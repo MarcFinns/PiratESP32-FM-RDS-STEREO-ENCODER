@@ -54,7 +54,7 @@
 
 #include "I2SDriver.h"
 
-#include "AudioConfig.h"
+#include "Config.h"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
@@ -109,8 +109,8 @@ namespace AudioIO
      */
     bool setupTx()
     {
-        // Import AudioConfig constants into local scope for cleaner syntax
-        using namespace AudioConfig;
+        // Import Config constants into local scope for cleaner syntax
+        using namespace Config;
 
         // ---- Log Initialization Start ----
         Serial.println("Initializing I2S TX (DAC @ 192kHz)...");
@@ -127,7 +127,7 @@ namespace AudioIO
             .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX),
 
             // ---- Sample Rate ----
-            // Sample rate in Hz (192,000 Hz from AudioConfig)
+            // Sample rate in Hz (192,000 Hz from Config)
             // Determines LRCK frequency (word select toggles at this rate)
             .sample_rate = SAMPLE_RATE_DAC,
 
@@ -195,7 +195,7 @@ namespace AudioIO
         // ---- Configure GPIO Pins ----
         //
         // i2s_pin_config_t maps I2S signals to physical GPIO pins.
-        // Pin numbers come from AudioConfig namespace.
+        // Pin numbers come from Config namespace.
 
         i2s_pin_config_t pins = {
             // MCLK output: 24.576 MHz master clock (shared with ADC)
@@ -264,8 +264,8 @@ namespace AudioIO
      */
     bool setupRx()
     {
-        // Import AudioConfig constants into local scope
-        using namespace AudioConfig;
+        // Import Config constants into local scope
+        using namespace Config;
 
         // ---- Log Initialization Start ----
         Serial.println("Initializing I2S RX (ADC @ 48kHz)...");
@@ -284,7 +284,7 @@ namespace AudioIO
             .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX),
 
             // ---- Sample Rate ----
-            // Sample rate in Hz (48,000 Hz from AudioConfig)
+            // Sample rate in Hz (48,000 Hz from Config)
             // LRCK toggles at this rate to indicate L/R channels
             .sample_rate = SAMPLE_RATE_ADC,
 

@@ -44,7 +44,7 @@ Example Doxygen header:
 
 ## FreeRTOS and Tasks
 
-- Start tasks via symmetric module APIs (e.g., `Log::startTask(...)`, `AudioEngine::startTask(...)`).
+- Start tasks via symmetric module APIs (e.g., `Log::startTask(...)`, `DSP_pipeline::startTask(...)`).
 - Avoid blocking operations in real‑time paths. Use queues/message buffers to decouple slow I/O (Serial).
 - Prefer fixed‑size messages and no heap allocation in ISR/RT tasks.
 

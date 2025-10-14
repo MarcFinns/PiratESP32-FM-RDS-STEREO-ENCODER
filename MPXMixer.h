@@ -13,7 +13,7 @@
 
 #include <cstddef>
 
-#include "AudioConfig.h"
+#include "Config.h"
 
 class MPXMixer
 {

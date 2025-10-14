@@ -6,7 +6,7 @@
  *
  * =====================================================================================
  *
- * File:         AudioConfig.h
+ * File:         Config.h
  * Description:  Centralized configuration for audio DSP pipeline
  *
  * Purpose:
@@ -47,7 +47,7 @@
  */
 #define DIAGNOSTIC_PRINT_INTERVAL 0
 
-namespace AudioConfig
+namespace Config
 {
     // ==================================================================================
     //                              GPIO PIN ASSIGNMENTS
@@ -271,7 +271,7 @@ namespace AudioConfig
     /**
      * VU Update Interval
      *
-     * How often the AudioEngine sends VU sample data to the display task.
+     * How often the DSP_pipeline sends VU sample data to the display task.
      * Faster updates provide more responsive meters but increase queue traffic.
      *
      * Current: 5 ms = 200 Hz update rate
@@ -424,7 +424,7 @@ namespace AudioConfig
     /** RDS symbol rate (RDS bps) */
     constexpr float RDS_SYMBOL_RATE = 1187.5f;
 
-} // namespace AudioConfig
+} // namespace Config
 
 // =====================================================================================
 //                                END OF FILE

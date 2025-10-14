@@ -6,10 +6,10 @@
  *
  * =====================================================================================
  *
- * File:         AudioEngine.cpp
+ * File:         DSP_pipeline.cpp
  * Description:  Implementation of the FM stereo encoding pipeline
  *
- * This file contains the complete implementation of the AudioEngine class, which
+ * This file contains the complete implementation of the DSP_pipeline class, which
  * orchestrates the real-time DSP pipeline that converts 48 kHz stereo audio into
  * a 192 kHz FM multiplex (MPX) signal suitable for transmission.
  *
@@ -27,7 +27,7 @@
  * =====================================================================================
  */
 
-#include "AudioEngine.h"
+#include "DSP_pipeline.h"
 #include "Diagnostics.h"
 #include "I2SDriver.h"
 #include "Log.h"
@@ -59,7 +59,7 @@ namespace
 // ==================================================================================
 
 /**
- * AudioEngine Constructor
+ * DSP_pipeline Constructor
  *
  * Initializes the audio processing pipeline with default settings.
  * All buffers are zero-initialized by default (BSS section).
@@ -72,9 +72,9 @@ namespace
  * Note: Hardware I2S interfaces are NOT configured here. Call begin() to
  *       initialize I2S and load DSP filter coefficients.
  */
-AudioEngine::AudioEngine()
-    : pilot_19k_(19000.0f, static_cast<float>(AudioConfig::SAMPLE_RATE_DAC)),
-      mpx_synth_(AudioConfig::PILOT_AMP, AudioConfig::DIFF_AMP)
+DSP_pipeline::DSP_pipeline()
+    : pilot_19k_(19000.0f, static_cast<float>(Config::SAMPLE_RATE_DAC)),
+      mpx_synth_(Config::PILOT_AMP, Config::DIFF_AMP)
 {
     // Initialize performance statistics to zero
     stats_.reset();
@@ -110,7 +110,7 @@ AudioEngine::AudioEngine()
  *   If I2S setup fails, an error is logged and the function returns false.
  *   The audio task will exit if begin() fails.
  */
-bool AudioEngine::begin()
+bool DSP_pipeline::begin()
 {
     // Log system configuration
     Log::enqueue(Log::INFO, "ESP32-S3 Audio DSP: 48kHz -> 192kHz");
@@ -139,21 +139,21 @@ bool AudioEngine::begin()
 
     // Configure pre-emphasis filter (50 µs for FM broadcast standard)
     // Alpha: filter coefficient, Gain: compensation for high-frequency boost
-    preemphasis_.configure(AudioConfig::PREEMPHASIS_ALPHA, AudioConfig::PREEMPHASIS_GAIN);
+    preemphasis_.configure(Config::PREEMPHASIS_ALPHA, Config::PREEMPHASIS_GAIN);
 
     // Configure 19 kHz notch filter to prevent pilot tone interference
     // Removes any audio content at the pilot frequency
-    notch_.configure(static_cast<float>(AudioConfig::SAMPLE_RATE_ADC),
-                     AudioConfig::NOTCH_FREQUENCY_HZ, AudioConfig::NOTCH_RADIUS);
+    notch_.configure(static_cast<float>(Config::SAMPLE_RATE_ADC),
+                     Config::NOTCH_FREQUENCY_HZ, Config::NOTCH_RADIUS);
 
     // Initialize polyphase FIR upsampler (loads filter coefficients from flash)
     upsampler_.initialize();
 
     // Configure RDS synthesizer if RDS transmission is enabled
     // RDS assembler task must be started separately in setup()
-    if (AudioConfig::RDS_ENABLE)
+    if (Config::RDS_ENABLE)
     {
-        rds_synth_.configure(static_cast<float>(AudioConfig::SAMPLE_RATE_DAC));
+        rds_synth_.configure(static_cast<float>(Config::SAMPLE_RATE_DAC));
     }
 
     // Reset performance statistics and start timing
@@ -189,7 +189,7 @@ bool AudioEngine::begin()
  *   2. Int→Float:       Convert Q31 to normalized float, calculate VU meters
  *   3. Pre-emphasis:    Apply 50 µs FM pre-emphasis filter
  *   4. Notch Filter:    Remove 19 kHz content (pilot tone protection)
- *   5. Upsample:        48 kHz → 192 kHz using polyphase FIR filter
+ *   5. Upsample:        48 kHz → 192 kHz using polyphase FIR filter with embedded 15 kHz low-pass
  *   6. Stereo Matrix:   Generate L+R (mono) and L-R (diff) signals
  *   7. MPX Synthesis:   Mix mono + pilot + (diff × 38 kHz) + RDS
  *   8. Float→Int:       Convert to Q31 and write to DAC
@@ -206,9 +206,9 @@ bool AudioEngine::begin()
  *   • No dynamic memory allocation in process()
  *   • All buffers are pre-allocated
  */
-void AudioEngine::process()
+void DSP_pipeline::process()
 {
-    using namespace AudioConfig;
+    using namespace Config;
 
     // ============================================================================
     // I2S READ: Acquire Audio Data from ADC
@@ -330,7 +330,7 @@ void AudioEngine::process()
         uint64_t        now_us       = esp_timer_get_time();
 
         // Check if enough time has elapsed since last VU update
-        if ((now_us - s_last_vu_us) >= AudioConfig::VU_UPDATE_INTERVAL_US)
+        if ((now_us - s_last_vu_us) >= Config::VU_UPDATE_INTERVAL_US)
         {
             s_last_vu_us = now_us;  // Update timestamp for next throttle check
 
@@ -344,11 +344,11 @@ void AudioEngine::process()
             // Convert peak levels to dBFS (decibels relative to full scale)
             // Formula: dBFS = 20 * log10(level / reference)
             // Silence (0.0) maps to -120 dBFS (effectively -∞)
-            vu.l_dbfs = (l_rms > 0.0f) ? (20.0f * log10f(std::min(l_peak, AudioConfig::DBFS_REF) /
-                                                         AudioConfig::DBFS_REF))
+            vu.l_dbfs = (l_rms > 0.0f) ? (20.0f * log10f(std::min(l_peak, Config::DBFS_REF) /
+                                                         Config::DBFS_REF))
                                        : -120.0f;
-            vu.r_dbfs = (r_rms > 0.0f) ? (20.0f * log10f(std::min(r_peak, AudioConfig::DBFS_REF) /
-                                                         AudioConfig::DBFS_REF))
+            vu.r_dbfs = (r_rms > 0.0f) ? (20.0f * log10f(std::min(r_peak, Config::DBFS_REF) /
+                                                         Config::DBFS_REF))
                                        : -120.0f;
 
             vu.frames = static_cast<uint32_t>(frames_read);            // Number of frames in this block
@@ -410,9 +410,9 @@ void AudioEngine::process()
     // The higher sample rate is required for FM multiplex synthesis.
     //
     // Upsampling Factor: 4× (48 kHz × 4 = 192 kHz)
-    // Filter Type: 79-tap polyphase FIR (Parks-McClellan optimal design)
-    // Passband: 0-20 kHz (preserves full audio bandwidth)
-    // Stopband: > 28 kHz (removes imaging artifacts)
+    // Filter Type: 96-tap polyphase FIR (Kaiser-windowed sinc)
+    // Passband: 0–15 kHz (FM audio limit)
+    // Stopband: ≥19 kHz (pilot protection, removes imaging artifacts)
     //
     // Input:  64 stereo frames @ 48 kHz  (128 samples total)
     // Output: 256 stereo frames @ 192 kHz (512 samples total)
@@ -487,13 +487,13 @@ void AudioEngine::process()
     // Sub-stage 6c: RDS Injection (Optional)
     // Adds RDS (Radio Data System) subcarrier at 57 kHz
     // RDS carries station info, song metadata, traffic alerts, etc.
-    if (AudioConfig::RDS_ENABLE)
+    if (Config::RDS_ENABLE)
     {
         uint32_t t_r0 = ESP.getCycleCount();  // Time RDS processing separately
 
         // Modulate RDS bitstream onto 57 kHz carrier
         // carrier57_buffer_ is phase-locked to pilot (57 kHz = 3 × 19 kHz)
-        rds_synth_.processBlockWithCarrier(carrier57_buffer_, AudioConfig::RDS_AMP, rds_buffer_,
+        rds_synth_.processBlockWithCarrier(carrier57_buffer_, Config::RDS_AMP, rds_buffer_,
                                            samples);
 
         // Mix RDS subcarrier into MPX signal
@@ -597,7 +597,7 @@ void AudioEngine::process()
     // ============================================================================
     //
     // Track signal levels through the pipeline for debugging.
-    // Only compiled if DIAGNOSTIC_PRINT_INTERVAL > 0 in AudioConfig.h.
+    // Only compiled if DIAGNOSTIC_PRINT_INTERVAL > 0 in Config.h.
     //
     int32_t peak_adc = Diagnostics::findPeakAbs(rx_buffer_, frames_read * 2);
 
@@ -703,7 +703,7 @@ void AudioEngine::process()
     //
     {
         static uint64_t s_last_status_us = 0;  // Last status update timestamp
-        if ((now - s_last_status_us) >= AudioConfig::STATUS_PANEL_UPDATE_US)
+        if ((now - s_last_status_us) >= Config::STATUS_PANEL_UPDATE_US)
         {
             s_last_status_us = now;  // Update timestamp for next status update
 
@@ -778,7 +778,7 @@ void AudioEngine::process()
  * Start Audio Task (Instance Method)
  *
  * Spawns a FreeRTOS task to run the audio processing loop for this specific
- * AudioEngine instance. Called internally by the static startTask() facade.
+ * DSP_pipeline instance. Called internally by the static startTask() facade.
  *
  * Parameters:
  *   core_id:      CPU core to pin the task (0 = audio core, 1 = display core)
@@ -795,13 +795,13 @@ void AudioEngine::process()
  *   true:  Task created successfully
  *   false: Task creation failed (out of memory or invalid parameters)
  */
-bool AudioEngine::startTaskInstance(int core_id, UBaseType_t priority, uint32_t stack_words)
+bool DSP_pipeline::startTaskInstance(int core_id, UBaseType_t priority, uint32_t stack_words)
 {
     BaseType_t ok = xTaskCreatePinnedToCore(
         taskTrampoline,   // Task function (static entry point)
         "audio",          // Task name (for debugging)
         stack_words,      // Stack size in words (not bytes!)
-        this,             // Parameter passed to task (AudioEngine* instance)
+        this,             // Parameter passed to task (DSP_pipeline* instance)
         priority,         // Task priority (6 = highest)
         &task_handle_,    // Task handle (for suspend/resume/delete)
         core_id           // CPU core (0 = audio core)
@@ -812,30 +812,30 @@ bool AudioEngine::startTaskInstance(int core_id, UBaseType_t priority, uint32_t 
 /**
  * Task Trampoline (Static Entry Point)
  *
- * FreeRTOS task entry point. Receives AudioEngine* as parameter, calls begin()
+ * FreeRTOS task entry point. Receives DSP_pipeline* as parameter, calls begin()
  * to initialize hardware, then enters infinite process() loop.
  *
  * This function never returns under normal operation. If begin() fails, the
  * task exits gracefully by calling vTaskDelete(nullptr).
  *
  * Parameters:
- *   arg:  Pointer to AudioEngine instance (void* for FreeRTOS compatibility)
+ *   arg:  Pointer to DSP_pipeline instance (void* for FreeRTOS compatibility)
  *
  * Execution Flow:
- *   1. Cast arg to AudioEngine*
+ *   1. Cast arg to DSP_pipeline*
  *   2. Call begin() to initialize I2S and DSP modules
  *   3. If begin() fails, log error and exit task
  *   4. Enter infinite loop calling process() (never returns)
  */
-void AudioEngine::taskTrampoline(void* arg)
+void DSP_pipeline::taskTrampoline(void* arg)
 {
-    // Cast void* parameter to AudioEngine* instance
-    auto* self = static_cast<AudioEngine*>(arg);
+    // Cast void* parameter to DSP_pipeline* instance
+    auto* self = static_cast<DSP_pipeline*>(arg);
 
     // Initialize hardware and DSP modules
     if (!self->begin())
     {
-        Log::enqueue(Log::ERROR, "AudioEngine begin() failed");
+        Log::enqueue(Log::ERROR, "DSP_pipeline begin() failed");
         vTaskDelete(nullptr);  // Exit task on initialization failure
         return;
     }
@@ -850,11 +850,11 @@ void AudioEngine::taskTrampoline(void* arg)
 /**
  * Start Audio Task (Static Singleton Facade)
  *
- * Convenience method that creates a managed AudioEngine singleton and spawns
+ * Convenience method that creates a managed DSP_pipeline singleton and spawns
  * its task. This is the recommended way to start the audio engine from main code.
  *
  * Singleton Pattern:
- *   A static AudioEngine instance is created on first call and reused thereafter.
+ *   A static DSP_pipeline instance is created on first call and reused thereafter.
  *   Only one audio engine can exist per application.
  *
  * Parameters:
@@ -868,12 +868,12 @@ void AudioEngine::taskTrampoline(void* arg)
  *
  * Example Usage:
  *   void setup() {
- *       AudioEngine::startTask(0, 6, 12288);  // Start audio on Core 0
+ *       DSP_pipeline::startTask(0, 6, 12288);  // Start audio on Core 0
  *   }
  */
-bool AudioEngine::startTask(int core_id, UBaseType_t priority, uint32_t stack_words)
+bool DSP_pipeline::startTask(int core_id, UBaseType_t priority, uint32_t stack_words)
 {
-    static AudioEngine s_instance;  // Singleton instance (created once)
+    static DSP_pipeline s_instance;  // Singleton instance (created once)
     return s_instance.startTaskInstance(core_id, priority, stack_words);
 }
 
@@ -918,10 +918,10 @@ bool AudioEngine::startTask(int core_id, UBaseType_t priority, uint32_t stack_wo
  *   Min free heap: 234567 bytes
  *   ========================================
  */
-void AudioEngine::printPerformance(std::size_t frames_read, float available_us, float cpu_usage,
+void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us, float cpu_usage,
                                    float cpu_headroom)
 {
-    using namespace AudioConfig;
+    using namespace Config;
 
     (void)frames_read;  // Unused parameter (reserved for future use)
 
@@ -998,7 +998,7 @@ void AudioEngine::printPerformance(std::size_t frames_read, float available_us, 
  * Print Diagnostic Signal Levels
  *
  * Logs signal levels at various points in the DSP pipeline for debugging.
- * Only compiled and called if DIAGNOSTIC_PRINT_INTERVAL > 0 in AudioConfig.h.
+ * Only compiled and called if DIAGNOSTIC_PRINT_INTERVAL > 0 in Config.h.
  *
  * This function helps diagnose gain staging issues by showing how signal levels
  * change through the pipeline. Useful for tuning pre-emphasis gain and preventing
@@ -1024,10 +1024,10 @@ void AudioEngine::printPerformance(std::size_t frames_read, float available_us, 
  *   • Total Gain shows overall level increase through entire pipeline
  *   • If Total Gain is too high (>6 dB), reduce PREEMPHASIS_GAIN in config
  */
-void AudioEngine::printDiagnostics(std::size_t frames_read, int32_t peak_adc, int32_t peak_pre,
+void DSP_pipeline::printDiagnostics(std::size_t frames_read, int32_t peak_adc, int32_t peak_pre,
                                    int32_t peak_fir, float pre_db, float total_db)
 {
-    using namespace AudioConfig;
+    using namespace Config;
 
     (void)frames_read;  // Unused parameter (reserved for future use)
 

@@ -7,7 +7,7 @@
  */
 #include "RDSSynth.h"
 
-#include "AudioConfig.h"
+#include "Config.h"
 #include "RDSAssembler.h"
 
 #include <cstring>
@@ -22,7 +22,7 @@ Synth::Synth() {}
 void Synth::configure(float sample_rate_hz)
 {
     // Manchester symbol timing at 1187.5 bps
-    sym_inc_ = (sample_rate_hz > 0.0f) ? (AudioConfig::RDS_SYMBOL_RATE / sample_rate_hz) : 0.0f;
+    sym_inc_ = (sample_rate_hz > 0.0f) ? (Config::RDS_SYMBOL_RATE / sample_rate_hz) : 0.0f;
     sym_phase_ = 0.0f;
     last_diff_ = 0;
     half_toggle_ = false;

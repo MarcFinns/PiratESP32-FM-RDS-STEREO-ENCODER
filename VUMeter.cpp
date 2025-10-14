@@ -11,7 +11,7 @@
  *
  * Architecture:
  *   • Runs on separate FreeRTOS task (core 1) to avoid blocking audio pipeline
- *   • Receives peak/RMS audio samples via lockless queue from AudioEngine
+ *   • Receives peak/RMS audio samples via lockless queue from DSP_pipeline
  *   • Uses delta rendering to minimize SPI traffic to display
  *   • Professional VU ballistics with fast attack, slow release
  *
@@ -30,7 +30,7 @@
  *
  * Technical Details:
  *   • Display: ILI9341 320x240 @ 40 MHz SPI
- *   • Audio samples: 5ms intervals (200 Hz from AudioEngine)
+ *   • Audio samples: 5ms intervals (200 Hz from DSP_pipeline)
  *   • Visual updates: 20ms intervals (~50 FPS)
  *   • Attack rate: 50 pixels/frame (instant response)
  *   • Release rate: 8 pixels/frame (natural decay)
@@ -40,7 +40,7 @@
 
 #include "VUMeter.h"
 
-#include "AudioConfig.h"
+#include "Config.h"
 #include "Log.h"
 
 #include <Arduino.h>
@@ -441,19 +441,19 @@ namespace VUMeter
         StatsSnapshot stats; // receives bottom-panel status snapshots
 
         bool display_ok = false;
-        if (AudioConfig::VU_DISPLAY_ENABLED)
+        if (Config::VU_DISPLAY_ENABLED)
         {
             // Optional BL pin
-            if (AudioConfig::TFT_BL >= 0)
+            if (Config::TFT_BL >= 0)
             {
-                pinMode((int)AudioConfig::TFT_BL, OUTPUT);
-                digitalWrite((int)AudioConfig::TFT_BL, HIGH);
+                pinMode((int)Config::TFT_BL, OUTPUT);
+                digitalWrite((int)Config::TFT_BL, HIGH);
             }
 
-            s_bus = new Arduino_ESP32SPI(AudioConfig::TFT_DC, AudioConfig::TFT_CS,
-                                         AudioConfig::TFT_SCK, AudioConfig::TFT_MOSI,
+            s_bus = new Arduino_ESP32SPI(Config::TFT_DC, Config::TFT_CS,
+                                         Config::TFT_SCK, Config::TFT_MOSI,
                                          GFX_NOT_DEFINED /* MISO */, 1 /* spi_num */);
-            s_gfx = new Arduino_ILI9341(s_bus, AudioConfig::TFT_RST, AudioConfig::TFT_ROTATION,
+            s_gfx = new Arduino_ILI9341(s_bus, Config::TFT_RST, Config::TFT_ROTATION,
                                         false /*IPS*/);
             if (s_gfx && s_gfx->begin())
             {
@@ -493,13 +493,13 @@ namespace VUMeter
                 float l = std::isfinite(s.l_dbfs) ? s.l_dbfs : -120.0f;
                 float r = std::isfinite(s.r_dbfs) ? s.r_dbfs : -120.0f;
 
-                if (AudioConfig::VU_DISPLAY_ENABLED && display_ok)
+                if (Config::VU_DISPLAY_ENABLED && display_ok)
                 {
                     // Use peak dBFS directly with offset, no additional smoothing
                     // Attack/release ballistics are handled by updateBar()
                     // The offset shifts the scale to make typical audio levels more visible
-                    float ldb = l + AudioConfig::VU_DB_OFFSET;
-                    float rdb = r + AudioConfig::VU_DB_OFFSET;
+                    float ldb = l + Config::VU_DB_OFFSET;
+                    float rdb = r + Config::VU_DB_OFFSET;
 
                     // dbToX handles clamping internally
                     chL.target = dbToX(ldb);
@@ -507,7 +507,7 @@ namespace VUMeter
                 }
             }
 
-            if (AudioConfig::VU_DISPLAY_ENABLED && display_ok)
+            if (Config::VU_DISPLAY_ENABLED && display_ok)
             {
                 uint32_t now_ms = millis();
                 if ((int32_t)(now_ms - last_frame_ms) >= (int32_t)FRAME_INTERVAL_MS)
@@ -522,8 +522,8 @@ namespace VUMeter
                 // Draw status panel when a new snapshot arrives (non-blocking)
                 if (g_stats_queue && xQueueReceive(g_stats_queue, &stats, 0) == pdTRUE)
                 {
-                    const int panelY = DISPLAY_HEIGHT - AudioConfig::STATUS_PANEL_HEIGHT;
-                    s_gfx->fillRect(0, panelY, DISPLAY_WIDTH, AudioConfig::STATUS_PANEL_HEIGHT,
+                    const int panelY = DISPLAY_HEIGHT - Config::STATUS_PANEL_HEIGHT;
+                    s_gfx->fillRect(0, panelY, DISPLAY_WIDTH, Config::STATUS_PANEL_HEIGHT,
                                     COLOR_BLACK);
                     s_gfx->setTextWrap(false);
                     s_gfx->setTextColor(COLOR_WHITE);
@@ -585,10 +585,10 @@ namespace VUMeter
                     // Line: Sample rates and configuration
                     snprintf(
                         line, sizeof(line), "Rates: %u kHz -> %u kHz  Up %ux  Block %u  %u-bit",
-                        (unsigned)(AudioConfig::SAMPLE_RATE_ADC / 1000u),
-                        (unsigned)(AudioConfig::SAMPLE_RATE_DAC / 1000u),
-                        (unsigned)AudioConfig::UPSAMPLE_FACTOR, (unsigned)AudioConfig::BLOCK_SIZE,
-                        (unsigned)AudioConfig::BITS_PER_SAMPLE);
+                        (unsigned)(Config::SAMPLE_RATE_ADC / 1000u),
+                        (unsigned)(Config::SAMPLE_RATE_DAC / 1000u),
+                        (unsigned)Config::UPSAMPLE_FACTOR, (unsigned)Config::BLOCK_SIZE,
+                        (unsigned)Config::BITS_PER_SAMPLE);
                     s_gfx->setCursor(4, y);
                     s_gfx->print(line);
 

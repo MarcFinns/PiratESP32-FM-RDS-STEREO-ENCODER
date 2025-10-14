@@ -12,7 +12,7 @@
  * Purpose:
  *   This module provides a thread-safe, non-blocking logging system that prevents
  *   Serial I/O from interfering with real-time audio processing. Log messages are
- *   enqueued by producer tasks (e.g., AudioEngine on Core 0) and drained by a
+ *   enqueued by producer tasks (e.g., DSP_pipeline on Core 0) and drained by a
  *   dedicated logger task running on Core 1.
  *
  * Design Principles:
@@ -136,7 +136,7 @@ namespace Log
      *
      * Output Format:
      *   [timestamp] message
-     *   Example: [12345678] AudioEngine started on core 0
+     *   Example: [12345678] DSP_pipeline started on core 0
      *
      * Parameters:
      *   arg: Unused (required by FreeRTOS task signature)
