@@ -6,7 +6,7 @@
  *
  * =====================================================================================
  *
- * File:         AUDIO_DSP_TEST_48_192_ESP_IDF_OPTIMISED.ino
+ * File:         ESP32_RDS_STEREO_SW_ENCODER_GIT.ino
  * Description:  Entry point for ESP32 FM stereo encoder with real-time DSP
  *
  * Overview:
