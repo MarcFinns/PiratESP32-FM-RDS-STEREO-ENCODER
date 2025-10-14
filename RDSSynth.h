@@ -16,7 +16,7 @@
  *        → scale → add to MPX
  *
  * Notes
- *   - Coherent 57 kHz carrier (3× pilot) is precomputed in AudioEngine from the
+ *   - Coherent 57 kHz carrier (3× pilot) is precomputed in DSP_pipeline from the
  *     master NCO (19 kHz). This guarantees exact 3× phase lock.
  *   - Baseband shaping uses two biquads via esp‑dsp for low CPU cost.
  *

@@ -103,7 +103,7 @@ namespace Log
      * Start Logger Task (Convenience Wrapper)
      *
      * Alternative initialization function with parameter order matching
-     * AudioEngine::startTask() for consistency across the codebase.
+     * DSP_pipeline::startTask() for consistency across the codebase.
      *
      * Parameters:
      *   core_id:      FreeRTOS core to pin the task (typically 1)

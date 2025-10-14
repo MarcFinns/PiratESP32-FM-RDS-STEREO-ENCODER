@@ -62,7 +62,7 @@ RST  (Reset):           GPIO 2
 ### Task Distribution
 
 **Core 0 (Real-Time Audio):**
-- `AudioEngine` task (priority 6 - highest)
+- `DSP_pipeline` task (priority 6 - highest)
 - Handles all audio I/O and DSP processing
 - Must maintain strict timing for glitch-free audio
 
@@ -122,7 +122,7 @@ Search for: "Adafruit GFX" and "Adafruit ILI9341"
 
 ## Configuration
 
-All configuration parameters are centralized in `AudioConfig.h`:
+All configuration parameters are centralized in `Config.h`:
 
 ### Key Parameters
 
@@ -150,7 +150,7 @@ VU_USE_PEAK_FOR_BAR = true // Peak (true) or RMS (false) mode
 
 ### GPIO Pin Customization
 
-Edit pin assignments in `AudioConfig.h` (lines 70-82 and 316-320) to match your hardware.
+Edit pin assignments in `Config.h` (lines 70-82 and 316-320) to match your hardware.
 
 ## Usage
 
@@ -180,7 +180,7 @@ RDSAssembler::setRT("Your message"); // RadioText (up to 64 chars)
 
 Serial console output (every 5 seconds):
 ```
-[timestamp] AudioEngine: 48000 Hz, CPU 22.5%, Headroom 77.5%
+[timestamp] DSP_pipeline: 48000 Hz, CPU 22.5%, Headroom 77.5%
 [timestamp] Peak: L=-12.3 dBFS, R=-14.1 dBFS
 ```
 
@@ -189,8 +189,8 @@ Serial console output (every 5 seconds):
 ```
 ESP32 RDS STEREO ENCODER/
 ├── ESP32 RDS STEREO ENCODER.ino  # Main application entry point
-├── AudioConfig.h                  # Central configuration file
-├── AudioEngine.h/.cpp             # DSP pipeline orchestrator
+├── Config.h                  # Central configuration file
+├── DSP_pipeline.h/.cpp             # DSP pipeline orchestrator
 ├── I2SDriver.h/.cpp               # I2S hardware interface
 ├── PreemphasisFilter.h/.cpp       # FM pre-emphasis filter
 ├── NotchFilter19k.h/.cpp          # 19 kHz notch filter
@@ -218,7 +218,7 @@ ESP32 RDS STEREO ENCODER/
 - Latency: 1.33 ms (negligible for audio applications)
 
 **Memory Usage:**
-- AudioEngine stack: 12 KB
+- DSP_pipeline stack: 12 KB
 - DSP buffers: ~9 KB
 - Logger stack: 4 KB
 - VU Meter stack: 4 KB
@@ -236,7 +236,7 @@ ESP32 RDS STEREO ENCODER/
 ### DSP Specifications
 - **Pre-emphasis**: 1st-order IIR high-pass, 50 µs time constant
 - **Notch filter**: 2nd-order IIR, 19 kHz center, Q=0.98
-- **Upsampler**: 79-tap polyphase FIR, 4× interpolation
+- **Upsampler**: 96-tap polyphase FIR (15 kHz LPF), 4× interpolation
 - **NCO**: Phase-accumulator synthesis, coherent harmonics
 
 ### Real-Time Constraints
@@ -262,7 +262,7 @@ ESP32 RDS STEREO ENCODER/
 - Try toggling `TFT_ROTATION` setting (0-3)
 
 **RDS not transmitting:**
-- Verify `RDS_ENABLE = true` in AudioConfig.h
+- Verify `RDS_ENABLE = true` in Config.h
 - Check RDS amplitude (`RDS_AMP`) - typical range 0.02-0.04
 - Monitor Serial console for RDS Assembler task errors
 

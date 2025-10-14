@@ -19,7 +19,7 @@
  *
  * Threading model
  *   - Producer: Assembler task (Core 1)
- *   - Consumer: AudioEngine (Core 0) calls nextBit() from the 192 kHz path
+ *   - Consumer: DSP_pipeline (Core 0) calls nextBit() from the 192 kHz path
  *
  */
 #pragma once

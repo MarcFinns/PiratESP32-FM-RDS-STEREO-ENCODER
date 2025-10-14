@@ -6,11 +6,11 @@
  *
  * =====================================================================================
  *
- * File:         AudioEngine.h
+ * File:         DSP_pipeline.h
  * Description:  Main audio processing pipeline orchestration
  *
  * Purpose:
- *   AudioEngine is the central coordinator for the entire FM stereo encoding pipeline.
+ *   DSP_pipeline is the central coordinator for the entire FM stereo encoding pipeline.
  *   It manages all DSP stages, I2S communication, and real-time performance monitoring.
  *   Runs as a dedicated FreeRTOS task on Core 0 (real-time audio core).
  *
@@ -40,7 +40,7 @@
  *
  * Memory Layout:
  *   All DSP buffers are 16-byte aligned for potential SIMD optimization.
- *   Total buffer memory: ~4 KB per AudioEngine instance.
+ *   Total buffer memory: ~4 KB per DSP_pipeline instance.
  *
  * Performance Monitoring:
  *   Every 5 seconds, prints to Serial:
@@ -60,7 +60,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "AudioConfig.h"
+#include "Config.h"
 #include "AudioStats.h"
 #include "MPXMixer.h"
 #include "NCO.h"
@@ -75,7 +75,7 @@
 // ==================================================================================
 
 /**
- * AudioEngine - FM Stereo Encoding Pipeline Orchestrator
+ * DSP_pipeline - FM Stereo Encoding Pipeline Orchestrator
  *
  * This class manages the complete audio processing pipeline from 48 kHz ADC input
  * to 192 kHz DAC output, including pre-emphasis, upsampling, and FM multiplex
@@ -89,13 +89,13 @@
  *   • Diagnostic logging (optional, disabled by default)
  *
  * Usage Pattern:
- *   1. Call AudioEngine::startTask() to spawn the audio task
- *   2. Task creates an AudioEngine instance and calls begin()
+ *   1. Call DSP_pipeline::startTask() to spawn the audio task
+ *   2. Task creates an DSP_pipeline instance and calls begin()
  *   3. Infinite loop calls process() at 48 kHz block rate (every 1.33 ms)
  *   4. Each process() call reads one block, processes it, and writes output
  *
  * Thread Safety:
- *   AudioEngine is NOT thread-safe. Each instance runs on a single dedicated task.
+ *   DSP_pipeline is NOT thread-safe. Each instance runs on a single dedicated task.
  *   Multiple instances are not supported (singleton pattern enforced by startTask()).
  *
  * Performance:
@@ -104,7 +104,7 @@
  *   CPU usage: ~22% (300 µs ÷ 1333 µs)
  *   Headroom: ~78% (margin for system jitter and interrupts)
  */
-class AudioEngine
+class DSP_pipeline
 {
 public:
     // ==================================================================================
@@ -114,17 +114,17 @@ public:
     /**
      * Constructor
      *
-     * Creates an AudioEngine instance with uninitialized DSP modules.
+     * Creates an DSP_pipeline instance with uninitialized DSP modules.
      * Hardware I2S interfaces are not configured until begin() is called.
      *
      * Note: Buffers are zero-initialized by default (BSS section).
      */
-    AudioEngine();
+    DSP_pipeline();
 
     /**
      * Initialize Audio Engine
      *
-     * Called by the audio task after AudioEngine construction. Performs:
+     * Called by the audio task after DSP_pipeline construction. Performs:
      *   1. I2S TX initialization (192 kHz DAC output)
      *   2. I2S RX initialization (48 kHz ADC input)
      *   3. NCO initialization (19 kHz pilot, 38 kHz subcarrier)
@@ -178,7 +178,7 @@ public:
      * Start Audio Task (Instance Method)
      *
      * Spawns a FreeRTOS task that runs the audio processing loop for this
-     * specific AudioEngine instance. Used internally by startTask().
+     * specific DSP_pipeline instance. Used internally by startTask().
      *
      * Parameters:
      *   core_id:      FreeRTOS core to pin the task (must be 0 for audio)
@@ -197,7 +197,7 @@ public:
     /**
      * Start Audio Task (Static Singleton)
      *
-     * Convenience method that creates a managed AudioEngine singleton and
+     * Convenience method that creates a managed DSP_pipeline singleton and
      * spawns its task. This is the recommended way to start the audio engine.
      *
      * Parameters:
@@ -210,7 +210,7 @@ public:
      *   false if task creation failed
      *
      * Example:
-     *   AudioEngine::startTask(0, 6, 12288);  // Core 0, priority 6, 48 KB stack
+     *   DSP_pipeline::startTask(0, 6, 12288);  // Core 0, priority 6, 48 KB stack
      *
      * Note: Only one audio engine instance is supported per application.
      */
@@ -234,7 +234,7 @@ private:
      *   cpu_headroom:  Headroom percentage (0-100%)
      *
      * Output Format:
-     *   [timestamp] AudioEngine: 48000 Hz, CPU 22.5%, Headroom 77.5%
+     *   [timestamp] DSP_pipeline: 48000 Hz, CPU 22.5%, Headroom 77.5%
      *   [timestamp] Peak: L=-12.3 dBFS, R=-14.1 dBFS
      */
     void printPerformance(std::size_t frames_read,
@@ -246,7 +246,7 @@ private:
      * Print Diagnostic Information
      *
      * Optional diagnostic logging for debugging DSP pipeline. Only compiled
-     *   if DIAGNOSTIC_PRINT_INTERVAL > 0 in AudioConfig.h.
+     *   if DIAGNOSTIC_PRINT_INTERVAL > 0 in Config.h.
      *
      * Logs:
      *   • ADC input peak levels
@@ -285,7 +285,7 @@ private:
     NotchFilter19k notch_;
 
     // ---- Polyphase FIR Upsampler ----
-    // 4× upsampling: 48 kHz → 192 kHz using 79-tap polyphase FIR filter
+    // 4× upsampling: 48 kHz → 192 kHz using 96-tap polyphase FIR (15 kHz LPF)
     PolyphaseFIRUpsampler upsampler_;
 
     // ---- Stereo Matrix ----
@@ -311,50 +311,50 @@ private:
     // ==================================================================================
     //
     // All buffers are aligned to 16-byte boundaries for potential SIMD optimization.
-    // Buffer sizes are determined by AudioConfig::BLOCK_SIZE and UPSAMPLE_FACTOR.
+    // Buffer sizes are determined by Config::BLOCK_SIZE and UPSAMPLE_FACTOR.
 
     // ---- I2S Buffers (int32, Q31 fixed-point) ----
-    alignas(16) int32_t rx_buffer_[AudioConfig::BLOCK_SIZE * 2];
+    alignas(16) int32_t rx_buffer_[Config::BLOCK_SIZE * 2];
     // RX buffer: 64 samples × 2 channels = 128 samples = 512 bytes
     // Holds 48 kHz stereo input from ADC (interleaved L, R, L, R, ...)
 
-    alignas(16) int32_t tx_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR * 2];
+    alignas(16) int32_t tx_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR * 2];
     // TX buffer: 64 × 4 × 2 = 512 samples = 2048 bytes
     // Holds 192 kHz stereo output to DAC (interleaved L, R, L, R, ...)
 
     // ---- Floating-Point Processing Buffers ----
-    alignas(16) float rx_f32_[AudioConfig::BLOCK_SIZE * 2];
+    alignas(16) float rx_f32_[Config::BLOCK_SIZE * 2];
     // RX float buffer: 64 × 2 = 128 floats = 512 bytes
     // Normalized float representation of ADC input [-1.0, +1.0]
 
-    alignas(16) float tx_f32_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR * 2];
+    alignas(16) float tx_f32_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR * 2];
     // TX float buffer: 512 floats = 2048 bytes
     // Normalized float representation of DAC output [-1.0, +1.0]
 
     // ---- FM Synthesis Buffers ----
-    alignas(16) float pilot_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
+    alignas(16) float pilot_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
     // Pilot tone buffer: 256 floats = 1024 bytes
     // 19 kHz sine wave for FM pilot tone
 
-    alignas(16) float subcarrier_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
+    alignas(16) float subcarrier_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
     // Subcarrier buffer: 256 floats = 1024 bytes
     // 38 kHz sine wave for L-R modulation
 
-    alignas(16) float mono_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
+    alignas(16) float mono_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
     // Mono buffer: 256 floats = 1024 bytes
     // L+R signal (mono audio content, 0-15 kHz)
 
-    alignas(16) float diff_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
+    alignas(16) float diff_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
     // Diff buffer: 256 floats = 1024 bytes
     // L-R signal (stereo difference, modulated onto 38 kHz)
 
-    alignas(16) float mpx_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
-    alignas(16) float carrier57_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
-    alignas(16) float rds_buffer_[AudioConfig::BLOCK_SIZE * AudioConfig::UPSAMPLE_FACTOR];
+    alignas(16) float mpx_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
+    alignas(16) float carrier57_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
+    alignas(16) float rds_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR];
     // MPX buffer: 256 floats = 1024 bytes (plus RDS injection)
     // Final FM multiplex signal (mono + pilot + L-R subcarrier + RDS)
 
-    // Total buffer memory: ~9 KB per AudioEngine instance
+    // Total buffer memory: ~9 KB per DSP_pipeline instance
 
     // ==================================================================================
     //                          DIAGNOSTIC COUNTERS
@@ -362,7 +362,7 @@ private:
 
 #if DIAGNOSTIC_PRINT_INTERVAL > 0
     // Frame counter for throttling diagnostic output
-    // Only compiled when diagnostics are enabled in AudioConfig.h
+    // Only compiled when diagnostics are enabled in Config.h
     uint32_t diagnostic_counter_ = 0;
 #endif
 
@@ -370,21 +370,21 @@ private:
     //                          FREERTOS TASK MANAGEMENT
     // ==================================================================================
 
-    // Task handle for this AudioEngine instance
+    // Task handle for this DSP_pipeline instance
     // Used to suspend/resume/delete the task if needed
     TaskHandle_t task_handle_ = nullptr;
 
     /**
      * Task Trampoline (Static Entry Point)
      *
-     * FreeRTOS task entry point. Receives AudioEngine* as arg parameter.
+     * FreeRTOS task entry point. Receives DSP_pipeline* as arg parameter.
      * Calls begin() to initialize, then enters infinite process() loop.
      *
      * Parameters:
-     *   arg: Pointer to AudioEngine instance (void* for FreeRTOS compatibility)
+     *   arg: Pointer to DSP_pipeline instance (void* for FreeRTOS compatibility)
      *
      * Execution Flow:
-     *   1. Cast arg to AudioEngine*
+     *   1. Cast arg to DSP_pipeline*
      *   2. Call begin() to initialize I2S and DSP modules
      *   3. Enter infinite loop calling process()
      *   4. If begin() fails, task exits (should never happen in production)

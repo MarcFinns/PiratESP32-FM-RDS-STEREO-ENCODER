@@ -34,7 +34,7 @@
  *   • Peak markers: Snap to peaks instantly, decay after 1-second hold
  *
  * Communication Pattern:
- *   1. AudioEngine (Core 0) calculates peak/RMS levels every 1.33 ms
+ *   1. DSP_pipeline (Core 0) calculates peak/RMS levels every 1.33 ms
  *   2. Sends VUMeter::Sample via queue (overwrite if full)
  *   3. VU task (Core 1) reads latest sample every 20 ms (50 FPS)
  *   4. Applies ballistics and renders to ILI9341 display
@@ -68,7 +68,7 @@ namespace VUMeter
     /**
      * VU Meter Sample Payload
      *
-     * Compact data structure sent from AudioEngine to VU meter task.
+     * Compact data structure sent from DSP_pipeline to VU meter task.
      * Contains all audio level metrics for both channels.
      *
      * Size: 28 bytes (7 × 4 bytes)
@@ -97,7 +97,7 @@ namespace VUMeter
      *   +3 dBFS = overload/clipping (red zone on VU meter)
      *
      * Usage:
-     *   AudioEngine fills this structure every 1.33 ms and sends via enqueue().
+     *   DSP_pipeline fills this structure every 1.33 ms and sends via enqueue().
      *   VU task reads the latest sample and applies ballistics for display.
      */
     struct Sample
@@ -153,7 +153,7 @@ namespace VUMeter
      * Example:
      *   VUMeter::startTask(1, 1, 4096, 1);  // Core 1, priority 1, mailbox queue
      *
-     * Note: If AudioConfig::VU_DISPLAY_ENABLED is false, this function may
+     * Note: If Config::VU_DISPLAY_ENABLED is false, this function may
      *       return true but the display will not initialize.
      */
     bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
@@ -183,7 +183,7 @@ namespace VUMeter
      * Enqueue VU Sample (Task Context)
      *
      * Sends a VU meter sample to the display task. This function is called by
-     * AudioEngine every 1.33 ms with updated audio level metrics.
+     * DSP_pipeline every 1.33 ms with updated audio level metrics.
      *
      * Mailbox Behavior:
      *   If queue_len = 1 (default), this function implements mailbox semantics:

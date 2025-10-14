@@ -70,15 +70,15 @@ namespace AudioIO
      *
      * I2S TX Configuration:
      *   • Mode: Master TX (ESP32 generates all clocks)
-     *   • Sample rate: 192,000 Hz (from AudioConfig::SAMPLE_RATE_DAC)
+     *   • Sample rate: 192,000 Hz (from Config::SAMPLE_RATE_DAC)
      *   • Format: 32-bit words, 24-bit audio, stereo (L/R interleaved)
-     *   • MCLK: 24.576 MHz (192k × 128) on GPIO configured in AudioConfig
+     *   • MCLK: 24.576 MHz (192k × 128) on GPIO configured in Config
      *   • BCK: 12.288 MHz (192k × 32 × 2 channels)
      *   • LRCK: 192 kHz (word select, toggles L/R)
      *   • DMA: 6 buffers × 240 samples (no queues, blocking I/O)
      *
      * Pin Assignment:
-     *   Pins are read from AudioConfig namespace:
+     *   Pins are read from Config namespace:
      *     • PIN_MCLK: Master clock output (24.576 MHz)
      *     • PIN_DAC_BCK: Bit clock (serial audio clock)
      *     • PIN_DAC_LRCK: Word select (L/R channel indicator)
@@ -101,7 +101,7 @@ namespace AudioIO
      *
      * I2S RX Configuration:
      *   • Mode: Master RX (ESP32 generates clocks, ADC is slave)
-     *   • Sample rate: 48,000 Hz (from AudioConfig::SAMPLE_RATE_ADC)
+     *   • Sample rate: 48,000 Hz (from Config::SAMPLE_RATE_ADC)
      *   • Format: 32-bit words, 24-bit audio, stereo (L/R interleaved)
      *   • MCLK: 24.576 MHz (shared from TX, 48k × 512)
      *   • BCK: 3.072 MHz (48k × 32 × 2 channels)
@@ -109,7 +109,7 @@ namespace AudioIO
      *   • DMA: 6 buffers × 240 samples (5 ms latency per buffer)
      *
      * Pin Assignment:
-     *   Pins are read from AudioConfig namespace:
+     *   Pins are read from Config namespace:
      *     • PIN_ADC_BCK: Bit clock
      *     • PIN_ADC_LRCK: Word select
      *     • PIN_ADC_DIN: Serial audio data input
