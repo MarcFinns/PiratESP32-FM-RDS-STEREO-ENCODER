@@ -1,15 +1,15 @@
 # ESP32 RDS STEREO ENCODER
 
-A professional-grade FM stereo encoder with RDS (Radio Data System) support, implemented on the ESP32 microcontroller. This project processes stereo audio in real-time through a sophisticated DSP pipeline to generate broadcast-quality FM multiplex signals.
+A professional-grade FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 microcontroller. This project processes stereo audio in real-time through a sophisticated DSP pipeline leveraging the ESP32-S3 SIMD achitecture, to generate broadcast-quality FM multiplex signals.
 
 ## Features
 
-- **Real-time FM Stereo Encoding**: Processes 48 kHz stereo input to 192 kHz FM multiplex output
-- **RDS Support**: Transmits station information (PS, RT, PI, PTY) via RDS protocol at 57 kHz
+- **Real-time FM Stereo Encoding**: Processes stereo input to FM multiplex output
+- **RDS Support**: Transmits station information (PS, RT, PI, PTY) via RDS protocol
 - **Professional DSP Pipeline**:
   - 50 µs pre-emphasis filtering (European FM standard)
   - 19 kHz notch filter to prevent pilot tone interference
-  - 4× polyphase FIR upsampling (48 kHz → 192 kHz)
+  - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
   - FM multiplex synthesis with pilot tone and subcarrier
 - **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring
@@ -23,8 +23,8 @@ A professional-grade FM stereo encoder with RDS (Radio Data System) support, imp
 - Minimum 520 KB SRAM recommended
 
 ### Audio Interfaces
-- **ADC**: PCM1808 I2S-compatible audio ADC (48 kHz sample rate)
-- **DAC**: PCM5102A I2S-compatible audio DAC (192 kHz sample rate)
+- **ADC**: PCM1808 I2S audio ADC (24 bit, 48 kHz sample rate)
+- **DAC**: PCM5102A I2S audio DAC (24 bit, 192 kHz sample rate)
 - **Master Clock**: 24.576 MHz MCLK for synchronization
 
 ### Display (Optional)
