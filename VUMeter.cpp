@@ -51,7 +51,7 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-#include <Arduino_GFX_Library.h>
+#include <Arduino_GFX_Library.h> // https://github.com/moononournation/Arduino_GFX
 
 namespace VUMeter
 {

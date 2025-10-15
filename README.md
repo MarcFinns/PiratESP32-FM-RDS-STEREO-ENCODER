@@ -23,9 +23,9 @@ A professional-grade FM stereo encoder with RDS (Radio Data System) support, imp
 - Minimum 520 KB SRAM recommended
 
 ### Audio Interfaces
-- **ADC**: PCM1808 I2S audio ADC (24 bit, 48 kHz sample rate)
-- **DAC**: PCM5102A I2S audio DAC (24 bit, 192 kHz sample rate)
-- **Master Clock**: 24.576 MHz MCLK for synchronization
+- **ADC**: PCM1808 I2S audio ADC (24 bit, 48 kHz sample rate, I2S slave)
+- **DAC**: PCM5102A I2S audio DAC (24 bit, 192 kHz sample rate, I2S slave)
+- **Master Clock**: 24.576 MHz MCLK for synchronization (ESP32 is I2S master)
 
 ### Display (Optional)
 - ILI9341 320×240 TFT LCD (SPI interface)
@@ -99,14 +99,10 @@ RST  (Reset):           GPIO 2
 - [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32)
 
 ### Libraries Required
-- **Adafruit_GFX** (for TFT display)
-- **Adafruit_ILI9341** (for TFT display driver)
+- **Arduino GFX** 
 
-Install via Arduino Library Manager:
-```
-Sketch → Include Library → Manage Libraries...
-Search for: "Adafruit GFX" and "Adafruit ILI9341"
-```
+Faster than Adafruit, supports many displays. Found on [github] (https://github.com/moononournation/Arduino_GFX)
+
 
 ### Compilation
 
@@ -150,7 +146,7 @@ VU_USE_PEAK_FOR_BAR = true // Peak (true) or RMS (false) mode
 
 ### GPIO Pin Customization
 
-Edit pin assignments in `Config.h` (lines 70-82 and 316-320) to match your hardware.
+Edit pin assignments in `Config.h` to match your hardware.
 
 ## Usage
 
