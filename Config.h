@@ -68,17 +68,17 @@ namespace Config
     //   - MCLK: Master clock for ADC/DAC synchronization
 
     // ---- Master Clock (Shared) ----
-    constexpr int PIN_MCLK     = 8;   // 24.576 MHz MCLK output (shared by ADC and DAC)
+    constexpr int PIN_MCLK = 8; // 24.576 MHz MCLK output (shared by ADC and DAC)
 
     // ---- DAC Interface (I2S TX @ 192 kHz) ----
-    constexpr int PIN_DAC_BCK  = 9;   // DAC bit clock (BCK)
-    constexpr int PIN_DAC_LRCK = 11;  // DAC word select (LRCK / WS)
-    constexpr int PIN_DAC_DOUT = 10;  // DAC serial data output
+    constexpr int PIN_DAC_BCK  = 9;  // DAC bit clock (BCK)
+    constexpr int PIN_DAC_LRCK = 11; // DAC word select (LRCK / WS)
+    constexpr int PIN_DAC_DOUT = 10; // DAC serial data output
 
     // ---- ADC Interface (I2S RX @ 48 kHz) ----
-    constexpr int PIN_ADC_BCK  = 4;   // ADC bit clock (BCK)
-    constexpr int PIN_ADC_LRCK = 6;   // ADC word select (LRCK / WS)
-    constexpr int PIN_ADC_DIN  = 5;   // ADC serial data input
+    constexpr int PIN_ADC_BCK  = 4; // ADC bit clock (BCK)
+    constexpr int PIN_ADC_LRCK = 6; // ADC word select (LRCK / WS)
+    constexpr int PIN_ADC_DIN  = 5; // ADC serial data input
 
     // ==================================================================================
     //                          SAMPLE RATES AND TIMING
@@ -133,8 +133,8 @@ namespace Config
      *   • BITS_PER_SAMPLE: Actual audio precision (24 bits)
      *   • BYTES_PER_SAMPLE: Memory allocation per sample (4 bytes = 32 bits)
      */
-    constexpr std::size_t BITS_PER_SAMPLE  = 24;  // 24-bit audio precision
-    constexpr std::size_t BYTES_PER_SAMPLE = 4;   // 32-bit word (4 bytes)
+    constexpr std::size_t BITS_PER_SAMPLE  = 24; // 24-bit audio precision
+    constexpr std::size_t BYTES_PER_SAMPLE = 4;  // 32-bit word (4 bytes)
 
     /**
      * Fixed-Point to Float Conversion Factor
@@ -231,6 +231,21 @@ namespace Config
     //   • Stereo subcarrier: 23-53 kHz (38 kHz ± 15 kHz), DSB-SC with L-R
 
     /**
+     * Feature toggles for MPX components
+     *
+     * ENABLE_AUDIO: Includes program audio into the composite (mono and L-R)
+     * ENABLE_PILOT: Includes the 19 kHz pilot tone
+     * ENABLE_RDS:   Includes the 57 kHz RDS subcarrier
+     * ENABLE_SUBCARRIER_38K: Enables the 38 kHz stereo subcarrier (L−R DSB)
+     */
+    constexpr bool ENABLE_AUDIO          = true;
+    constexpr bool ENABLE_PILOT          = true;
+    constexpr bool ENABLE_RDS            = true;
+    constexpr bool ENABLE_SUBCARRIER_38K = true;
+
+    // (Subcarrier phase offset removed; NCO now uses sine basis with zero-cross alignment)
+
+    /**
      * Pilot Tone Amplitude
      *
      * The 19 kHz pilot tone indicates stereo transmission to the receiver.
@@ -248,7 +263,28 @@ namespace Config
      *
      * Value: 0.90 (90% of available modulation depth)
      */
-    constexpr float DIFF_AMP = 0.90f;
+    /**
+     * Stereo difference (L-R) injection.
+     * Set to 1.0 so decoded L/R at the receiver have correct unity gain
+     * when combined with the unscaled L+R path. Reduce if composite peaks
+     * approach clipping, or add composite limiting.
+     */
+    constexpr float DIFF_AMP = 1.0f;
+
+    // ==================================================================================
+    //                          CARRIER TEST OUTPUT (DEBUG)
+    // ==================================================================================
+    /**
+     * TEST_OUTPUT_CARRIERS:
+     *   When true, bypass normal MPX generation and output:
+     *     Left DAC  = 19 kHz pilot (sine)
+     *     Right DAC = 38 kHz subcarrier (sine)
+     *   Useful to verify phase relationship on an oscilloscope.
+     */
+    constexpr bool TEST_OUTPUT_CARRIERS = false;
+
+    /** Amplitude for test carriers (0.0..1.0). */
+    constexpr float TEST_CARRIER_AMP = 0.80f;
 
     // ==================================================================================
     //                          PERFORMANCE MONITORING
@@ -263,6 +299,21 @@ namespace Config
      * Value: 5,000,000 microseconds (5 seconds)
      */
     constexpr uint64_t STATS_PRINT_INTERVAL_US = 5000000ULL;
+
+    // ==================================================================================
+    //                             LEVEL TAPS (DIAGNOSTICS)
+    // ==================================================================================
+    // Optional lightweight peak logging at key pipeline stages to analyze headroom
+    // and potential clipping. Disabled by default. Non‑destructive and easy to remove.
+
+    /** Enable/disable level taps logging. */
+    constexpr bool LEVEL_TAPS_ENABLE = true;
+
+    /**
+     * Level taps logging interval.
+     * How often to print peak levels summary. Default matches perf logs (5 s).
+     */
+    constexpr uint64_t LEVEL_TAPS_INTERVAL_US = 5000000ULL;
 
     // ==================================================================================
     //                          VU METER CONFIGURATION
@@ -313,11 +364,11 @@ namespace Config
     // Standard SPI interface with separate DC (Data/Command) pin.
     // Uses hardware SPI (VSPI on ESP32) for maximum transfer speed.
 
-    constexpr int TFT_SCK  = 40;  // SPI clock (SCLK)
-    constexpr int TFT_MOSI = 41;  // SPI data out (MOSI / SDI)
-    constexpr int TFT_DC   = 42;  // Data/Command select (DC / RS)
-    constexpr int TFT_CS   = 1;   // Chip select (CS)
-    constexpr int TFT_RST  = 2;   // Hardware reset (RST)
+    constexpr int TFT_SCK  = 40; // SPI clock (SCLK)
+    constexpr int TFT_MOSI = 41; // SPI data out (MOSI / SDI)
+    constexpr int TFT_DC   = 42; // Data/Command select (DC / RS)
+    constexpr int TFT_CS   = 1;  // Chip select (CS)
+    constexpr int TFT_RST  = 2;  // Hardware reset (RST)
 
     /**
      * TFT Backlight Control Pin
@@ -415,8 +466,6 @@ namespace Config
     // ==================================================================================
     //                          RDS (RADIO DATA SYSTEM)
     // ==================================================================================
-    /** Enable/disable RDS injection into MPX */
-    constexpr bool RDS_ENABLE = true;
 
     /** RDS injection amplitude (fraction of full-scale MPX). Typical 0.02–0.04 */
     constexpr float RDS_AMP = 0.03f;

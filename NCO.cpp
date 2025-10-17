@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+
 namespace
 {
 constexpr float kTwoPi = 6.28318530717958647692f;
@@ -56,22 +57,20 @@ void NCO::generate_harmonics(float *pilot_out, float *sub_out, float *rds_out, s
         return;
     }
     const std::size_t mask = TABLE_SIZE - 1;
+
     for (std::size_t i = 0; i < len; ++i)
     {
         // Generate phase-coherent harmonics of the fundamental (19 kHz)
-        // All carriers shifted by +0.25 cycles to get cosine (90° ahead of sine)
-        //
-        // p1: 1st harmonic (19 kHz) for pilot tone
-        // p2: 2nd harmonic (38 kHz) for stereo subcarrier (L-R modulation)
-        // p3: 3rd harmonic (57 kHz) for RDS subcarrier
+        // Sine-basis: all carriers in sine phase (zero-cross aligned)
+        // p1: 1×phase (19 kHz) pilot; p2: 2×phase (38 kHz); p3: 3×phase (57 kHz)
 
-        float p1 = phase_ + 0.25f;              // 1×phase + 90°
+        float p1 = phase_;                      // 1×phase (sine)
         if (p1 >= 1.0f) p1 -= 1.0f;
 
-        float p2 = (phase_ * 2.0f) + 0.25f;     // 2×phase + 90°
+        float p2 = (phase_ * 2.0f);             // 2×phase (sine)
         if (p2 >= 1.0f) p2 -= 1.0f;
 
-        float p3 = (phase_ * 3.0f) + 0.25f;     // 3×phase + 90°
+        float p3 = (phase_ * 3.0f);             // 3×phase (sine)
         if (p3 >= 1.0f) p3 -= 1.0f;
 
         auto sample_cos = [&](float pf) {
