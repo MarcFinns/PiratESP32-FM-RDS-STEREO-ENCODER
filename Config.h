@@ -186,9 +186,11 @@ namespace Config
      * Compensates for the RMS level reduction caused by high-pass filtering.
      * Ensures consistent modulation depth across frequency spectrum.
      *
-     * Value: 3.0x gain (empirically tuned for FM stereo)
+     * Value: 1.5x gain (reduced from 3.0x to eliminate shrillness)
+     * Note: Original 3.0x was too aggressive and caused excessive treble boost.
+     * A 1.5x gain is more natural and matches typical FM broadcast standards.
      */
-    constexpr float PREEMPHASIS_GAIN = 3.0f;
+    constexpr float PREEMPHASIS_GAIN = 1.5f;
 
     // ==================================================================================
     //                         19 kHz NOTCH FILTER PARAMETERS
@@ -243,7 +245,13 @@ namespace Config
     constexpr bool ENABLE_RDS            = true;
     constexpr bool ENABLE_SUBCARRIER_38K = true;
 
-    // (Subcarrier phase offset removed; NCO now uses sine basis with zero-cross alignment)
+    /**
+     * Enable/Disable Pre-emphasis
+     *
+     * For measurement and A/B testing. When false, the pre-emphasis stage is
+     * bypassed entirely and audio proceeds unmodified from the ADC domain.
+     */
+    constexpr bool ENABLE_PREEMPHASIS = true;
 
     /**
      * Pilot Tone Amplitude
@@ -464,7 +472,9 @@ namespace Config
     // ==================================================================================
 
     /** RDS injection amplitude (fraction of full-scale MPX). Typical 0.02–0.04 */
-    constexpr float RDS_AMP = 0.03f;
+    // Note: Increased from 0.03 to 0.04 for better compatibility with older receivers
+    // (e.g., Denon DRA-365RD 1994). Newer receivers handle lower levels fine.
+    constexpr float RDS_AMP = 0.04f;
 
     /** RDS symbol rate (RDS bps) */
     constexpr float RDS_SYMBOL_RATE = 1187.5f;
