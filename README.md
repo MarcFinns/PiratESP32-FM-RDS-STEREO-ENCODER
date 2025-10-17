@@ -131,13 +131,20 @@ SAMPLE_RATE_DAC = 192000  // Output sample rate (Hz)
 BLOCK_SIZE = 64           // Samples per block (1.33 ms latency)
 PREEMPHASIS_TIME_CONSTANT_US = 50.0f  // 50 µs (EU) or 75 µs (USA)
 
-// FM multiplex levels
+// Multiplex levels
 PILOT_AMP = 0.09f         // Pilot tone amplitude (9%)
-DIFF_AMP = 0.90f          // Stereo difference amplitude (90%)
-
-// RDS configuration
-RDS_ENABLE = true         // Enable/disable RDS transmission
+DIFF_AMP = 1.00f          // Stereo difference amplitude (unity)
 RDS_AMP = 0.03f           // RDS injection level (3%)
+
+// MPX component toggles (for measurements/testing)
+ENABLE_AUDIO = true        // Program audio (L+R and L-R) into MPX
+ENABLE_PILOT = true        // 19 kHz pilot tone
+ENABLE_RDS = true          // 57 kHz RDS subcarrier
+ENABLE_SUBCARRIER_38K = true // Enable 38 kHz stereo subcarrier (L−R DSB)
+TEST_OUTPUT_CARRIERS = false // If true: Left=19 kHz pilot, Right=38 kHz subcarrier
+
+// Diagnostics
+LEVEL_TAPS_ENABLE = true  // Peak levels at key stages (5 s max)
 
 // Display settings
 VU_DISPLAY_ENABLED = true // Enable/disable TFT display
@@ -258,7 +265,7 @@ ESP32 RDS STEREO ENCODER/
 - Try toggling `TFT_ROTATION` setting (0-3)
 
 **RDS not transmitting:**
-- Verify `RDS_ENABLE = true` in Config.h
+- Verify `ENABLE_RDS = true` in Config.h
 - Check RDS amplitude (`RDS_AMP`) - typical range 0.02-0.04
 - Monitor Serial console for RDS Assembler task errors
 

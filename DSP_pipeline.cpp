@@ -151,7 +151,7 @@ bool DSP_pipeline::begin()
 
     // Configure RDS synthesizer if RDS transmission is enabled
     // RDS assembler task must be started separately in setup()
-    if (Config::RDS_ENABLE)
+    if (Config::ENABLE_RDS)
     {
         rds_synth_.configure(static_cast<float>(Config::SAMPLE_RATE_DAC));
     }
@@ -210,6 +210,30 @@ void DSP_pipeline::process()
 {
     using namespace Config;
 
+    // ===== Helper lambdas for optional level taps =====
+    auto peak_interleaved_abs = [](const float *st, std::size_t frames) -> float {
+        float peak = 0.0f;
+        if (!st || frames == 0) return 0.0f;
+        for (std::size_t i = 0; i < frames; ++i)
+        {
+            float a = fabsf(st[i * 2 + 0]);
+            float b = fabsf(st[i * 2 + 1]);
+            float m = (a > b) ? a : b;
+            if (m > peak) peak = m;
+        }
+        return peak;
+    };
+    auto peak_abs = [](const float *buf, std::size_t n) -> float {
+        float peak = 0.0f;
+        if (!buf || n == 0) return 0.0f;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            float a = fabsf(buf[i]);
+            if (a > peak) peak = a;
+        }
+        return peak;
+    };
+
     // ============================================================================
     // I2S READ: Acquire Audio Data from ADC
     // ============================================================================
@@ -245,6 +269,43 @@ void DSP_pipeline::process()
     if (frames_read == 0)
     {
         return; // Incomplete frame, skip processing
+    }
+
+    // Optional: Carrier test output mode (bypass full pipeline)
+    if (Config::TEST_OUTPUT_CARRIERS)
+    {
+        std::size_t samples = frames_read * UPSAMPLE_FACTOR; // 192 kHz domain
+
+        // Generate coherent 19/38/57 kHz carriers from master NCO
+        pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_, samples);
+
+        // Left = 19 kHz pilot, Right = 38 kHz subcarrier
+        for (std::size_t i = 0; i < samples; ++i)
+        {
+            float L = Config::TEST_CARRIER_AMP * pilot_buffer_[i];
+            float R = Config::TEST_CARRIER_AMP * subcarrier_buffer_[i];
+            tx_f32_[i * 2 + 0] = L;
+            tx_f32_[i * 2 + 1] = R;
+        }
+
+        // Convert to Q31 and write to DAC
+        std::size_t out_samples = samples * 2; // stereo interleaved
+        for (std::size_t i = 0; i < out_samples; ++i)
+        {
+            float v = tx_f32_[i];
+            v       = std::min(0.9999999f, std::max(-1.0f, v));
+            tx_buffer_[i] = static_cast<int32_t>(v * 2147483647.0f);
+        }
+
+        size_t bytes_to_write = out_samples * BYTES_PER_SAMPLE;
+        size_t bytes_written  = 0;
+        esp_err_t retw = i2s_write(kI2SPortTx, tx_buffer_, bytes_to_write, &bytes_written, portMAX_DELAY);
+        if (retw != ESP_OK || bytes_written != bytes_to_write)
+        {
+            ++stats_.errors;
+        }
+        ++stats_.loops_completed;
+        return;
     }
 
     // ============================================================================
@@ -291,11 +352,18 @@ void DSP_pipeline::process()
         float vl = static_cast<float>(rx_buffer_[iL]) / Q31_FULL_SCALE;
         float vr = static_cast<float>(rx_buffer_[iR]) / Q31_FULL_SCALE;
 
+        // Apply early audio gating so meters and entire pipeline reflect toggle
+        if (!Config::ENABLE_AUDIO)
+        {
+            vl = 0.0f;
+            vr = 0.0f;
+        }
+
         // Store converted samples in floating-point buffer
         rx_f32_[iL] = vl;
         rx_f32_[iR] = vr;
 
-        // Accumulate squared samples for RMS calculation
+        // Accumulate squared samples for RMS calculation (after gating)
         l_sum_sq += vl * vl;
         r_sum_sq += vr * vr;
 
@@ -314,6 +382,25 @@ void DSP_pipeline::process()
     uint32_t t1        = ESP.getCycleCount();
     uint32_t stage1_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_int_to_float.update(stage1_us);
+
+    // ===== Level taps: Stage 1 (after int→float), store higher of L/R =====
+    static uint64_t s_levels_last_print_us = 0;
+    static float    s_peak_in   = 0.0f;
+    static float    s_peak_pre  = 0.0f;
+    static float    s_peak_notch= 0.0f;
+    static float    s_peak_up   = 0.0f;
+    static float    s_peak_mono = 0.0f;
+    static float    s_peak_diff = 0.0f;
+    static float    s_peak_mpx  = 0.0f;
+    static uint64_t s_clip_cnt  = 0;
+    static float    s_max_over  = 0.0f;
+
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float in_pk = (l_peak > r_peak) ? l_peak : r_peak;
+        if (in_pk > s_peak_in) s_peak_in = in_pk;
+        if (s_levels_last_print_us == 0) s_levels_last_print_us = esp_timer_get_time();
+    }
 
     // ============================================================================
     // VU Meter Update (Throttled)
@@ -376,6 +463,11 @@ void DSP_pipeline::process()
     //
     t0 = t1;  // Start timing Stage 2
     preemphasis_.process(rx_f32_, frames_read);
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float pre_pk = peak_interleaved_abs(rx_f32_, frames_read);
+        if (pre_pk > s_peak_pre) s_peak_pre = pre_pk;
+    }
     t1                 = ESP.getCycleCount();
     uint32_t stage2_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_preemphasis.update(stage2_us);
@@ -398,6 +490,11 @@ void DSP_pipeline::process()
     //
     t0 = t1;  // Start timing Stage 3
     notch_.process(rx_f32_, frames_read);
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float n_pk = peak_interleaved_abs(rx_f32_, frames_read);
+        if (n_pk > s_peak_notch) s_peak_notch = n_pk;
+    }
     t1                      = ESP.getCycleCount();
     uint32_t stage_notch_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_notch.update(stage_notch_us);
@@ -425,6 +522,11 @@ void DSP_pipeline::process()
     //
     t0 = t1;  // Start timing Stage 4
     upsampler_.process(rx_f32_, tx_f32_, frames_read);
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float up_pk = peak_interleaved_abs(tx_f32_, frames_read * UPSAMPLE_FACTOR);
+        if (up_pk > s_peak_up) s_peak_up = up_pk;
+    }
     t1                 = ESP.getCycleCount();
     uint32_t stage3_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_upsample.update(stage3_us);
@@ -448,7 +550,15 @@ void DSP_pipeline::process()
     //
     t0                  = t1;  // Start timing Stage 5
     std::size_t samples = frames_read * UPSAMPLE_FACTOR;  // 256 samples per channel @ 192 kHz
+
     stereo_matrix_.process(tx_f32_, mono_buffer_, diff_buffer_, samples);
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float mono_pk = peak_abs(mono_buffer_, samples);
+        float diff_pk = peak_abs(diff_buffer_, samples);
+        if (mono_pk > s_peak_mono) s_peak_mono = mono_pk;
+        if (diff_pk > s_peak_diff) s_peak_diff = diff_pk;
+    }
     t1                       = ESP.getCycleCount();
     uint32_t stage_matrix_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_matrix.update(stage_matrix_us);
@@ -477,7 +587,14 @@ void DSP_pipeline::process()
 
     // Sub-stage 6a: Generate phase-coherent carriers from master 19 kHz NCO
     // Pilot = 19 kHz, Subcarrier = 38 kHz (2nd harmonic), RDS = 57 kHz (3rd harmonic)
-    pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_, samples);
+    // Generate carriers only if needed for this block
+    bool need19 = Config::ENABLE_PILOT;
+    bool need38 = (Config::ENABLE_AUDIO && Config::ENABLE_SUBCARRIER_38K);   // DSB uses 38 kHz subcarrier
+    bool need57 = Config::ENABLE_RDS;     // RDS subcarrier at 57 kHz
+    if (need19 || need38 || need57)
+    {
+        pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_, samples);
+    }
 
     // Sub-stage 6b: Mix mono, pilot, and modulated stereo difference
     // MPX = mono + (pilot × pilot_amp) + (diff × subcarrier × diff_amp)
@@ -487,7 +604,7 @@ void DSP_pipeline::process()
     // Sub-stage 6c: RDS Injection (Optional)
     // Adds RDS (Radio Data System) subcarrier at 57 kHz
     // RDS carries station info, song metadata, traffic alerts, etc.
-    if (Config::RDS_ENABLE)
+    if (Config::ENABLE_RDS)
     {
         uint32_t t_r0 = ESP.getCycleCount();  // Time RDS processing separately
 
@@ -507,14 +624,23 @@ void DSP_pipeline::process()
         stats_.stage_rds.update(rds_us);
     }
 
+    // Capture MPX peak after mix (and RDS), before duplication
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        float mpx_pk = peak_abs(mpx_buffer_, samples);
+        if (mpx_pk > s_peak_mpx) s_peak_mpx = mpx_pk;
+    }
+
+    // MPX band power diagnostic removed (use external measurement tools)
+
     // Sub-stage 6d: Duplicate MPX to stereo DAC channels
     // The MPX signal is mono (composite baseband), but I2S requires stereo output.
-    // Both L and R DAC channels carry the same MPX signal.
+    // Apply optional per-channel mutes here so measurements reflect channel gates.
     for (std::size_t i = 0; i < samples; ++i)
     {
-        float mpx          = mpx_buffer_[i];  // Get MPX sample
-        tx_f32_[i * 2 + 0] = mpx;             // Left DAC channel
-        tx_f32_[i * 2 + 1] = mpx;             // Right DAC channel (duplicate)
+        float mpx = mpx_buffer_[i];  // Get MPX sample
+        tx_f32_[i * 2 + 0] = mpx;    // Left DAC channel
+        tx_f32_[i * 2 + 1] = mpx;    // Right DAC channel (duplicate)
     }
 
     t1                    = ESP.getCycleCount();
@@ -545,9 +671,23 @@ void DSP_pipeline::process()
     float       sum_output_sq = 0.0f;  // For output RMS calculation
     std::size_t out_samples   = frames_read * UPSAMPLE_FACTOR * 2;  // 256 frames × 2 channels = 512 samples
 
+    // Track pre-clamp overshoot if level taps enabled
+    uint64_t block_clip_cnt = 0;
+    float    block_max_over = 0.0f;
+
     for (std::size_t i = 0; i < out_samples; ++i)
     {
         float v = tx_f32_[i];  // Get floating-point sample
+
+        if (Config::LEVEL_TAPS_ENABLE)
+        {
+            float over = fabsf(v) - 1.0f;
+            if (over > 0.0f)
+            {
+                ++block_clip_cnt;
+                if (over > block_max_over) block_max_over = over;
+            }
+        }
 
         // Soft clip to prevent DAC overload
         // Max: +0.9999999 (just below full scale)
@@ -560,6 +700,13 @@ void DSP_pipeline::process()
         // Convert to Q31 fixed-point (int32)
         // Multiply by INT32_MAX (2,147,483,647)
         tx_buffer_[i] = static_cast<int32_t>(v * 2147483647.0f);
+    }
+
+    // Accumulate clipping stats for level taps
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        s_clip_cnt += block_clip_cnt;
+        if (block_max_over > s_max_over) s_max_over = block_max_over;
     }
 
     // Calculate output RMS level (for monitoring/diagnostics)
@@ -575,6 +722,31 @@ void DSP_pipeline::process()
     stats_.stage_float_to_int.update(stage4_us);
 
     // Note: Overall pipeline gain is no longer logged (removed per design decision)
+
+    // ===== Level taps: throttled log print =====
+    if (Config::LEVEL_TAPS_ENABLE)
+    {
+        uint64_t now_us = esp_timer_get_time();
+        if ((now_us - s_levels_last_print_us) >= Config::LEVEL_TAPS_INTERVAL_US)
+        {
+            auto dbfs = [](float x) -> float {
+                if (x <= 0.0f) return -120.0f;
+                return 20.0f * log10f(x);
+            };
+            Log::enqueuef(Log::INFO,
+                          "Levels (5s max): in=%.1f dBFS pre=%.1f notch=%.1f up=%.1f mono=%.1f diff=%.1f mpx=%.1f | clips=%llu max_over=+%.3f",
+                          (double)dbfs(s_peak_in), (double)dbfs(s_peak_pre), (double)dbfs(s_peak_notch),
+                          (double)dbfs(s_peak_up), (double)dbfs(s_peak_mono), (double)dbfs(s_peak_diff),
+                          (double)dbfs(s_peak_mpx), (unsigned long long)s_clip_cnt, (double)s_max_over);
+
+            // Reset for next window
+            s_levels_last_print_us = now_us;
+            s_peak_in = s_peak_pre = s_peak_notch = s_peak_up = 0.0f;
+            s_peak_mono = s_peak_diff = s_peak_mpx = 0.0f;
+            s_clip_cnt = 0;
+            s_max_over = 0.0f;
+        }
+    }
 
 #if DIAGNOSTIC_PRINT_INTERVAL > 0
     int32_t peak_adc = Diagnostics::findPeakAbs(rx_buffer_, frames_read * 2);

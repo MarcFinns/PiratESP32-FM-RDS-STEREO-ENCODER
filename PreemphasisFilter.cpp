@@ -33,9 +33,7 @@ void PreemphasisFilter::process(float *buffer, std::size_t frames)
     float filtered_L = (current_L - alpha_ * prev_left_) * gain_;
     float filtered_R = (current_R - alpha_ * prev_right_) * gain_;
 
-    // Clamp to [-1, 1]
-    filtered_L = std::min(1.0f, std::max(-1.0f, filtered_L));
-    filtered_R = std::min(1.0f, std::max(-1.0f, filtered_R));
+    // No clamping here: keep pre-emphasis linear and manage headroom downstream
 
     buffer[i * 2 + 0] = filtered_L;
     buffer[i * 2 + 1] = filtered_R;
@@ -44,4 +42,3 @@ void PreemphasisFilter::process(float *buffer, std::size_t frames)
     prev_right_ = current_R;
   }
 }
-

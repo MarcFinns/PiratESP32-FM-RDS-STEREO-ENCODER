@@ -131,7 +131,7 @@ void setup()
 
     // ---- Start RDS Assembler Task (Core 1) ----
     // Non-real-time task to build RDS bitstream; audio core will synthesize
-    if (Config::RDS_ENABLE)
+    if (Config::ENABLE_RDS)
     {
         RDSAssembler::startTask(1,    // core_id: Core 1
                                 1,    // priority: Low
