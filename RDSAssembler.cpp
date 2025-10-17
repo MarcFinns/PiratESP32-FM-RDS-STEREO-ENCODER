@@ -28,6 +28,11 @@ static char     g_rt[64] = { 'H','e','l','l','o',' ','R','D','S',' ','o','n',' '
                               ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ' };
 static bool     g_rt_ab  = false;  // Text A/B flag (toggle to force RT refresh on receivers)
 
+// ============ AF (Alternative Frequencies) state (Method A) ============
+static uint8_t  g_af_codes[25];  // up to 25 AF codes
+static uint8_t  g_af_count = 0;  // number of valid AF codes
+static uint8_t  g_af_cursor = 0; // rotating index into AF codes
+
 // Clock‑Time (Group 4A) state
 static bool     g_ct_enabled = false;
 static uint16_t g_ct_mjd     = 0;   // Modified Julian Date (16‑bit, local date)
@@ -80,6 +85,16 @@ static inline void enqueueBlock(uint16_t info, uint16_t offset)
     }
 }
 
+// Map FM frequency (MHz) to AF code (1..204), 0 if out of range
+static inline uint8_t fm_freq_to_af_code(float mhz)
+{
+    // Round to nearest 0.1 MHz, then map 87.6..107.9 → codes 1..204
+    int tenths = (int)(mhz * 10.0f + 0.5f); // e.g., 101.1 → 1011
+    int n = tenths - 875;                   // 87.5 → 0; 87.6 → 1; ... 107.9 → 204
+    if (n < 1 || n > 204) return 0;
+    return (uint8_t)n;
+}
+
 // Build and enqueue one Group 2A (RadioText 64) for the given segment address (0..15).
 static void buildGroup2A(uint8_t seg)
 {
@@ -105,7 +120,50 @@ static void buildGroup2A(uint8_t seg)
     enqueueBlock(d, kOffsetD);
 }
 
-// Build and enqueue one Group 0A (Program Service name) for the given segment (0..3)
+// Build and enqueue one Group 0A (PS + AF) for the given segment (0..3)
+static void buildGroup0A(uint8_t seg)
+{
+    // Block A: PI
+    enqueueBlock(g_pi, kOffsetA);
+
+    // Block B: group 0A flags + DI bit + segment (lower 2 bits)
+    // Bits: 15..12 = 0b0000, 11=0 (A), 10=TP, 9..5=PTY, 4=TA, 3=MS, 2=DI, 1..0=seg
+    uint16_t b = 0;
+    b |= (g_tp ? 1u : 0u) << 10;
+    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
+    b |= (g_ta ? 1u : 0u) << 4;
+    b |= (g_ms ? 1u : 0u) << 3;
+    // DI bit (transmitted per segment). We use a benign fixed pattern (0) here.
+    b |= ((uint16_t)0u) << 2;
+    b |= (seg & 0x03u);
+    enqueueBlock(b, kOffsetB);
+
+    // Block C: AF pair (Method A)
+    uint8_t af1 = 0, af2 = 0;
+    if (g_af_count > 0)
+    {
+        if (g_af_cursor == 0)
+        {
+            af1 = (uint8_t)(224 + g_af_count); // length code
+            af2 = g_af_codes[0];
+            g_af_cursor = 1;
+        }
+        else
+        {
+            af1 = g_af_codes[g_af_cursor % g_af_count];
+            af2 = g_af_codes[(g_af_cursor + 1) % g_af_count];
+            g_af_cursor = (uint8_t)((g_af_cursor + 2) % g_af_count);
+        }
+    }
+    uint16_t c = ((uint16_t)af1 << 8) | af2;
+    enqueueBlock(c, kOffsetC);
+
+    // Block D: two PS characters (segment)
+    uint8_t i0 = seg * 2;
+    uint16_t d = ((uint16_t)(uint8_t)g_ps[i0 + 0] << 8) | (uint16_t)(uint8_t)g_ps[i0 + 1];
+    enqueueBlock(d, kOffsetD);
+}
+
 // Build and enqueue one Group 0B (Program Service name) for the given segment (0..3)
 // Version B is used to avoid AF handling; PS chars are carried in block D.
 static void buildGroup0B(uint8_t seg)
@@ -191,7 +249,7 @@ static void assembler_task(void *arg)
     // Group rotation indices
     uint8_t seg_ps = 0;      // 0..3
     uint8_t seg_rt = 0;      // 0..15
-    uint8_t rot    = 0;      // rotation counter to insert CT periodically
+    uint8_t rot    = 0;      // cadence: 0,1 -> PS; 2 -> RT
 
     // Bit buffer for current 26‑bit block serialization
     // We build whole groups on demand by calling buildGroupXX, which enqueues bits directly.
@@ -215,22 +273,20 @@ static void assembler_task(void *arg)
             // For simplicity, push one bit per pacing; but if the queue gets low, prefill by emitting a group.
             if (uxQueueMessagesWaiting(g_bit_queue) < 26)
             {
-                // Rotation: 0B, 2A, 0B, 2A, 4A (if enabled), repeat
-                if ((rot % 5) == 4 && g_ct_enabled)
-                {
-                    buildGroup4A();
-                }
-                else if ((rot & 1u) == 1u)
+                // Cadence: PS, PS, RT (repeat). Always use Group 0A (not 0B) for compatibility
+                // with older receivers (e.g., Denon DRA-365RD) which may not properly
+                // decode Group 0B. Group 0A with or without AF list is more widely supported.
+                if (rot == 2)
                 {
                     buildGroup2A(seg_rt);
                     seg_rt = (uint8_t)((seg_rt + 1) & 0x0F);
                 }
                 else
                 {
-                    buildGroup0B(seg_ps);
+                    buildGroup0A(seg_ps);  // Always use 0A, not 0B
                     seg_ps = (uint8_t)((seg_ps + 1) & 0x03);
                 }
-                rot = (uint8_t)((rot + 1) % 5);
+                rot = (uint8_t)((rot + 1) % 3);
             }
 
             // Emit one bit from the queue at this pacing tick (acts as a drain limiter)
@@ -296,6 +352,28 @@ void setRT(const char *rt)
     }
     // Toggle A/B flag to force RT refresh on receivers
     g_rt_ab = !g_rt_ab;
+}
+
+void setAF_FM(const float *freqs_mhz, std::size_t count)
+{
+    g_af_count = 0;
+    g_af_cursor = 0;
+    if (!freqs_mhz || count == 0) return;
+    // Deduplicate and map to AF codes
+    for (std::size_t i = 0; i < count && g_af_count < 25; ++i)
+    {
+        uint8_t code = fm_freq_to_af_code(freqs_mhz[i]);
+        if (code == 0) continue;
+        bool exists = false;
+        for (uint8_t k = 0; k < g_af_count; ++k)
+        {
+            if (g_af_codes[k] == code) { exists = true; break; }
+        }
+        if (!exists)
+        {
+            g_af_codes[g_af_count++] = code;
+        }
+    }
 }
 
 // Compute Modified Julian Date (MJD) from Gregorian Y/M/D

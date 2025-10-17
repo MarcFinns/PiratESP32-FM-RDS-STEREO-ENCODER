@@ -79,8 +79,10 @@ void Synth::processBlockWithCarrier(const float *carrier57, float amp, float *ou
             sym_phase_ -= 1.0f;
             half_toggle_ = false;
 
-            // Fetch the next bit (non‑blocking); idle = 0 if none available
-            uint8_t bit = 0;
+            // Fetch the next bit (non‑blocking); idle = 1 (RDS standard)
+            // When queue is empty, use idle bit = 1 instead of 0.
+            // This provides better clock recovery on older receivers.
+            uint8_t bit = 1;
             RDSAssembler::nextBit(bit);
 
             // Differential encoding: d[k] = d[k-1] XOR b[k]
