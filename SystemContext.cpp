@@ -90,7 +90,7 @@ SystemContext::~SystemContext()
  * 1. Validate hardware driver (required)
  * 2. Initialize hardware driver (I2S setup, DMA, etc.)
  * 3. Start Logger task (Core 1) - needed for all downstream diagnostics
- * 4. Start VU Meter task (Core 1) - display feedback
+ * 4. Start VU Meter task (Core 0) - display feedback
  * 5. Start RDS Assembler task (Core 1) if enabled - RDS bitstream generation
  * 6. Start DSP Pipeline task (Core 0) - audio processing (highest priority)
  *
@@ -148,7 +148,7 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     // ---- Step 2: Start Logger Task (Core 1) ----
     // Logger must be started early so downstream modules can log
     // Priority 2: Medium, higher than VU meter and RDS
-    if (!Log::startTask(1,                          // core_id: Core 1 (I/O core)
+    if (!Log::startTask(Config::LOGGER_CORE,        // core_id
                         Config::LOGGER_PRIORITY,    // priority
                         Config::LOGGER_STACK_WORDS, // stack_words
                         Config::LOGGER_QUEUE_LEN))  // queue_len
@@ -159,9 +159,9 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
 
     Log::enqueuef(LogLevel::INFO, "Logger task started on Core 1");
 
-    // ---- Step 3: Start VU Meter Task (Core 1) ----
+    // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging
-    if (!VUMeter::startTask(1,                       // core_id: Core 1 (I/O core)
+    if (!VUMeter::startTask(Config::VU_CORE,         // core_id
                             Config::VU_PRIORITY,     // priority
                             Config::VU_STACK_WORDS,  // stack_words
                             Config::VU_QUEUE_LEN))   // queue_len (mailbox)
@@ -171,13 +171,13 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     }
     else
     {
-        Log::enqueuef(LogLevel::INFO, "VU Meter task started on Core 1");
+        Log::enqueuef(LogLevel::INFO, "VU Meter task started on Core %d", Config::VU_CORE);
     }
 
     // ---- Step 4: Start RDS Assembler Task (Core 1) if Enabled ----
     if (enable_rds)
     {
-        if (!RDSAssembler::startTask(1,                        // core_id: Core 1 (I/O core)
+        if (!RDSAssembler::startTask(Config::RDS_CORE,         // core_id
                                      Config::RDS_PRIORITY,     // priority
                                      Config::RDS_STACK_WORDS,  // stack_words
                                      Config::RDS_BIT_QUEUE_LEN)) // queue_len: bits
@@ -197,8 +197,8 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     // SystemContext::getDSPPipeline() returns the running object.
     dsp_pipeline_ = new DSP_pipeline(hardware_driver_);
     if (!dsp_pipeline_->startTaskInstance(
-            dsp_core_id,   // core_id: Core 0 (dedicated)
-            dsp_priority,  // priority: Highest (typically 6)
+            dsp_core_id,      // core_id: Core 0 (dedicated audio processing)
+            dsp_priority,     // priority: Highest (typically 6 for real-time audio)
             dsp_stack_words)) // stack_words: 12KB typical
     {
         Log::enqueuef(LogLevel::ERROR, "Failed to start DSP Pipeline task");

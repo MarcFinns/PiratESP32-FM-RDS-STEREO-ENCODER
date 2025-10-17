@@ -35,7 +35,7 @@ setup() calls SystemContext::initialize()
   ├─ Step 2: Start Logger task (Core 1, priority 2)
   |          (Logging available for all downstream modules)
   |
-  ├─ Step 3: Start VU Meter task (Core 1, priority 1)
+  ├─ Step 3: Start VU Meter task (Core 0, priority 1)
   |          (Display feedback - non-critical)
   |
   ├─ Step 4: Start RDS Assembler task (Core 1, priority 1)
@@ -168,8 +168,8 @@ bool SystemContext::initialize(
         return false;
     }
 
-    // Step 3: Start VU Meter (Core 1, priority 1)
-    if (!VUMeter::startTask(1, 1, 4096, 1)) {
+    // Step 3: Start VU Meter (Core 0, priority 1)
+    if (!VUMeter::startTask(0, 1, 4096, 1)) {
         Log::enqueuef(LogLevel::WARN, "VUMeter start failed (non-critical)");
     }
 
@@ -313,7 +313,7 @@ Log::startTask(
 ### VU Meter Module
 ```cpp
 VUMeter::startTask(
-    core_id=1,          // Core 1 (I/O core)
+    core_id=0,          // Core 0 (along with DSP processing)
     priority=1,         // Low priority (visual only)
     stack_words=4096,   // 4 KB stack
     queue_len=1);       // Single-slot mailbox
