@@ -69,6 +69,7 @@
 #include "PreemphasisFilter.h"
 #include "StereoMatrix.h"
 #include "RDSSynth.h"
+#include "IHardwareDriver.h"  // Hardware abstraction layer
 
 // ==================================================================================
 //                          AUDIO ENGINE CLASS
@@ -117,9 +118,14 @@ public:
      * Creates an DSP_pipeline instance with uninitialized DSP modules.
      * Hardware I2S interfaces are not configured until begin() is called.
      *
+     * Parameters:
+     *   hardware_driver:  Injected dependency for hardware I/O operations
+     *                     (typically ESP32I2SDriver instance)
+     *
      * Note: Buffers are zero-initialized by default (BSS section).
+     *       hardware_driver must remain valid for the lifetime of DSP_pipeline.
      */
-    DSP_pipeline();
+    explicit DSP_pipeline(IHardwareDriver* hardware_driver);
 
     /**
      * Initialize Audio Engine
@@ -195,26 +201,30 @@ public:
     bool startTaskInstance(int core_id, UBaseType_t priority, uint32_t stack_words);
 
     /**
-     * Start Audio Task (Static Singleton)
+     * Start Audio Task (Static with Hardware Driver)
      *
-     * Convenience method that creates a managed DSP_pipeline singleton and
-     * spawns its task. This is the recommended way to start the audio engine.
+     * Creates a DSP_pipeline instance with injected hardware driver and spawns
+     * its task. This is the recommended way to start the audio engine with
+     * explicit hardware dependency.
      *
      * Parameters:
-     *   core_id:      FreeRTOS core (must be 0 for audio)
-     *   priority:     Task priority (typically 6)
-     *   stack_words:  Stack size in words (typically 12288)
+     *   hardware_driver:  Hardware I/O implementation (e.g., ESP32I2SDriver)
+     *   core_id:          FreeRTOS core (must be 0 for audio)
+     *   priority:         Task priority (typically 6)
+     *   stack_words:      Stack size in words (typically 12288)
      *
      * Returns:
      *   true if task creation succeeded
      *   false if task creation failed
      *
      * Example:
-     *   DSP_pipeline::startTask(0, 6, 12288);  // Core 0, priority 6, 48 KB stack
+     *   ESP32I2SDriver driver;
+     *   DSP_pipeline::startTask(&driver, 0, 6, 12288);
      *
-     * Note: Only one audio engine instance is supported per application.
+     * Note: hardware_driver must remain valid for the lifetime of the audio task.
      */
-    static bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words);
+    static bool startTask(IHardwareDriver* hardware_driver, int core_id, UBaseType_t priority,
+                          uint32_t stack_words);
 
 private:
     // ==================================================================================
@@ -305,6 +315,11 @@ private:
     // ---- Audio Statistics Tracker ----
     // Calculates peak, RMS, and dBFS levels for VU meter display
     AudioStats stats_;
+
+    // ---- Hardware I/O Driver ----
+    // Abstraction layer for I2S operations (injected dependency)
+    // Enables testing and hardware independence
+    IHardwareDriver* hardware_driver_;
 
     // ==================================================================================
     //                          AUDIO BUFFERS (16-BYTE ALIGNED)

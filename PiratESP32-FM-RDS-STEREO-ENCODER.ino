@@ -50,6 +50,7 @@
  */
 
 #include "DSP_pipeline.h"
+#include "ESP32I2SDriver.h"
 #include "Log.h"
 #include "RDSAssembler.h"
 #include "VUMeter.h"
@@ -149,9 +150,15 @@ void setup()
     // Real-time audio processing - highest priority
     // Runs independently on Core 0 for deterministic timing
     // Priority 6: Highest priority (audio cannot be interrupted)
-    DSP_pipeline::startTask(0,    // core_id: Core 0 (dedicated audio core)
-                            6,    // priority: Highest priority
-                            12288 // stack_words: 12KB stack (DSP buffers + FreeRTOS overhead)
+
+    // Create hardware I/O driver (injected dependency)
+    static ESP32I2SDriver hw_driver;
+
+    // Start audio pipeline with injected hardware driver
+    DSP_pipeline::startTask(&hw_driver,  // hardware_driver: Injected I/O driver
+                            0,           // core_id: Core 0 (dedicated audio core)
+                            6,           // priority: Highest priority
+                            12288        // stack_words: 12KB stack (DSP buffers + FreeRTOS overhead)
     );
 
     // At this point, all three tasks are running independently
