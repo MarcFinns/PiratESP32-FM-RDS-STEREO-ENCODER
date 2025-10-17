@@ -276,21 +276,6 @@ namespace Config
     constexpr float DIFF_AMP = 0.9f;
 
     // ==================================================================================
-    //                          CARRIER TEST OUTPUT (DEBUG)
-    // ==================================================================================
-    /**
-     * TEST_OUTPUT_CARRIERS:
-     *   When true, bypass normal MPX generation and output:
-     *     Left DAC  = 19 kHz pilot (sine)
-     *     Right DAC = 38 kHz subcarrier (sine)
-     *   Useful to verify phase relationship on an oscilloscope.
-     */
-    constexpr bool TEST_OUTPUT_CARRIERS = false;
-
-    /** Amplitude for test carriers (0.0..1.0). */
-    constexpr float TEST_CARRIER_AMP = 0.80f;
-
-    // ==================================================================================
     //                          PERFORMANCE MONITORING
     // ==================================================================================
 
