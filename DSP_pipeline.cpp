@@ -281,8 +281,14 @@ void DSP_pipeline::process()
 
         size_t bytes_to_write = out_samples * BYTES_PER_SAMPLE;
         size_t bytes_written  = 0;
-        esp_err_t retw = i2s_write(kI2SPortTx, tx_buffer_, bytes_to_write, &bytes_written, portMAX_DELAY);
-        if (retw != ESP_OK || bytes_written != bytes_to_write)
+
+        // Write test carriers via hardware abstraction layer
+        if (!hardware_driver_->write(tx_buffer_, bytes_to_write, bytes_written))
+        {
+            ++stats_.errors;
+        }
+
+        if (bytes_written != bytes_to_write)
         {
             ++stats_.errors;
         }
