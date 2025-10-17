@@ -261,15 +261,11 @@ namespace Config
      * The difference signal (L-R) is modulated onto a 38 kHz suppressed carrier.
      * Amplitude is chosen to maintain proper stereo separation without overmodulation.
      *
-     * Value: 0.90 (90% of available modulation depth)
+     * Value: 0.90 (90% of available modulation depth) according to
+     * https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.450-4-201910-I%21%21PDF-E.pdf
      */
-    /**
-     * Stereo difference (L-R) injection.
-     * Set to 1.0 so decoded L/R at the receiver have correct unity gain
-     * when combined with the unscaled L+R path. Reduce if composite peaks
-     * approach clipping, or add composite limiting.
-     */
-    constexpr float DIFF_AMP = 1.0f;
+
+    constexpr float DIFF_AMP = 0.9f;
 
     // ==================================================================================
     //                          CARRIER TEST OUTPUT (DEBUG)
