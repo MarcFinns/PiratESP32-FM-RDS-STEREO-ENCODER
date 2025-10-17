@@ -78,6 +78,10 @@ void setPS(const char *ps);
 // Set Radio Text (up to 64 chars, padded or truncated by the builder)
 void setRT(const char *rt);
 
+// Set Clock-Time (Group 4A). All parameters are local time (not UTC).
+// offset_half_hours: local time offset from UTC in 30‑minute steps (e.g., +2h = +4)
+void setClock(int year, int month, int day, int hour, int minute, int8_t offset_half_hours);
+
 // (Sketch) Additional controls commonly used in RDS:
 // - setPI(uint16_t pi)      : Program Identification
 // - setPTY(uint8_t pty)     : Program Type

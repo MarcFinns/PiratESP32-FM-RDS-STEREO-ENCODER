@@ -28,6 +28,14 @@ static char     g_rt[64] = { 'H','e','l','l','o',' ','R','D','S',' ','o','n',' '
                               ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ' };
 static bool     g_rt_ab  = false;  // Text A/B flag (toggle to force RT refresh on receivers)
 
+// Clock‑Time (Group 4A) state
+static bool     g_ct_enabled = false;
+static uint16_t g_ct_mjd     = 0;   // Modified Julian Date (16‑bit, local date)
+static uint8_t  g_ct_hour    = 0;   // Local hour 0..23
+static uint8_t  g_ct_min     = 0;   // Local minute 0..59
+static bool     g_ct_lto_neg = false; // Local time offset sign (true = negative)
+static uint8_t  g_ct_lto_hh  = 0;     // Local time offset magnitude (0..31 half‑hours)
+
 // ============ CRC10 and offset words ============
 // CRC polynomial: x^10 + x^8 + x^7 + x^5 + x^4 + x^3 + 1 (0x5B9)
 static inline uint16_t crc10(uint16_t info)
@@ -130,6 +138,36 @@ static void buildGroup0B(uint8_t seg)
     enqueueBlock(d, kOffsetD);
 }
 
+// Build and enqueue one Group 4A (Clock‑Time and Date)
+// Practical mapping used here:
+//  - Block B: group 4A header with TP/PTY and local time offset sign (bit 4)
+//  - Block C: 16‑bit MJD (local date)
+//  - Block D: hour (5 bits), minute (6 bits), local time offset magnitude (5 bits)
+static void buildGroup4A()
+{
+    // Block A: PI
+    enqueueBlock(g_pi, kOffsetA);
+
+    // Block B: group 4A header with TP/PTY; use bit4 for LTO sign (1=negative)
+    uint16_t b = 0;
+    b |= (4u << 12);               // Group 4
+    // version A -> bit 11 = 0
+    b |= (g_tp ? 1u : 0u) << 10;
+    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
+    b |= (g_ct_lto_neg ? 1u : 0u) << 4; // local time offset sign
+    enqueueBlock(b, kOffsetB);
+
+    // Block C: 16‑bit MJD (local date)
+    enqueueBlock(g_ct_mjd, kOffsetC);
+
+    // Block D: hour (5), minute (6), offset magnitude (5)
+    uint16_t d = 0;
+    d |= ((uint16_t)(g_ct_hour & 0x1Fu)) << 11;  // bits 15..11
+    d |= ((uint16_t)(g_ct_min  & 0x3Fu)) << 5;   // bits 10..5
+    d |= ((uint16_t)(g_ct_lto_hh & 0x1Fu));      // bits 4..0
+    enqueueBlock(d, kOffsetD);
+}
+
 bool nextBit(uint8_t &bit)
 {
     if (!g_bit_queue)
@@ -151,11 +189,18 @@ static void assembler_task(void *arg)
     const uint32_t bit_us = 842; // approximate
 
     // Group rotation indices
-    uint8_t seg_ps = 0;  // 0..3
-    uint8_t seg_rt = 0;  // 0..15
+    uint8_t seg_ps = 0;      // 0..3
+    uint8_t seg_rt = 0;      // 0..15
+    uint8_t rot    = 0;      // rotation counter to insert CT periodically
 
     // Bit buffer for current 26‑bit block serialization
     // We build whole groups on demand by calling buildGroupXX, which enqueues bits directly.
+
+    // Default CT: October 26, 1985 00:00 (local), UTC offset 0
+    if (!g_ct_enabled)
+    {
+        setClock(1985, 10, 26, 0, 0, 0);
+    }
 
     for (;;)
     {
@@ -170,17 +215,22 @@ static void assembler_task(void *arg)
             // For simplicity, push one bit per pacing; but if the queue gets low, prefill by emitting a group.
             if (uxQueueMessagesWaiting(g_bit_queue) < 26)
             {
-                // Alternate 0A and 2A to keep PS fresh and RT flowing
-                if ((seg_rt & 0x01) == 0)
+                // Rotation: 0B, 2A, 0B, 2A, 4A (if enabled), repeat
+                if ((rot % 5) == 4 && g_ct_enabled)
                 {
-                    buildGroup0B(seg_ps);
-                    seg_ps = (uint8_t)((seg_ps + 1) & 0x03);
+                    buildGroup4A();
                 }
-                else
+                else if ((rot & 1u) == 1u)
                 {
                     buildGroup2A(seg_rt);
                     seg_rt = (uint8_t)((seg_rt + 1) & 0x0F);
                 }
+                else
+                {
+                    buildGroup0B(seg_ps);
+                    seg_ps = (uint8_t)((seg_ps + 1) & 0x03);
+                }
+                rot = (uint8_t)((rot + 1) % 5);
             }
 
             // Emit one bit from the queue at this pacing tick (acts as a drain limiter)
@@ -246,6 +296,36 @@ void setRT(const char *rt)
     }
     // Toggle A/B flag to force RT refresh on receivers
     g_rt_ab = !g_rt_ab;
+}
+
+// Compute Modified Julian Date (MJD) from Gregorian Y/M/D
+static uint16_t ymd_to_mjd16(int year, int month, int day)
+{
+    // Fliegel-Van Flandern algorithm
+    int a = (14 - month) / 12;
+    int y = year + 4800 - a;
+    int m = month + 12 * a - 3;
+    long jdn = day + (153 * m + 2) / 5 + 365L * y + y / 4 - y / 100 + y / 400 - 32045;
+    long mjd = jdn - 2400001; // JDN 2400001 corresponds to MJD 0 (approx)
+    if (mjd < 0) mjd = 0;
+    if (mjd > 65535) mjd = 65535;
+    return (uint16_t)mjd;
+}
+
+void setClock(int year, int month, int day, int hour, int minute, int8_t offset_half_hours)
+{
+    if (hour < 0) hour = 0; if (hour > 23) hour = 23;
+    if (minute < 0) minute = 0; if (minute > 59) minute = 59;
+    // Store local time and offset sign/magnitude
+    g_ct_hour = (uint8_t)hour;
+    g_ct_min  = (uint8_t)minute;
+    g_ct_lto_neg = (offset_half_hours < 0);
+    int off = offset_half_hours < 0 ? -offset_half_hours : offset_half_hours;
+    if (off > 31) off = 31;
+    g_ct_lto_hh = (uint8_t)off;
+    // Compute MJD from local date
+    g_ct_mjd = ymd_to_mjd16(year, month, day);
+    g_ct_enabled = true;
 }
 
 void setPI(uint16_t pi) { g_pi = pi; }

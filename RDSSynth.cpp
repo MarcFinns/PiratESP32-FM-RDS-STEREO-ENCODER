@@ -62,10 +62,11 @@ void Synth::processBlockWithCarrier(const float *carrier57, float amp, float *ou
         samples = 512; // skeleton safeguard; adjust if larger blocks are used
     }
 
+    float sign = (last_diff_ & 1u) ? neg : one; // Differential phase state (+1/-1)
     for (std::size_t i = 0; i < samples; ++i)
     {
-        // First or second half of the Manchester symbol
-        bb[i] = half_toggle_ ? neg : one;
+        // Manchester (bi‑phase mark): mid‑symbol inversion; apply differential sign
+        bb[i] = sign * (half_toggle_ ? neg : one);
 
         // Advance the symbol NCO, toggling mid‑symbol and stepping to next bit at 1.0
         sym_phase_ += sym_inc_;
@@ -84,6 +85,7 @@ void Synth::processBlockWithCarrier(const float *carrier57, float amp, float *ou
 
             // Differential encoding: d[k] = d[k-1] XOR b[k]
             last_diff_ ^= (bit & 1u);
+            sign = (last_diff_ & 1u) ? neg : one;
         }
     }
 
@@ -98,4 +100,3 @@ void Synth::processBlockWithCarrier(const float *carrier57, float amp, float *ou
     }
 }
 } // namespace RDSSynth
-

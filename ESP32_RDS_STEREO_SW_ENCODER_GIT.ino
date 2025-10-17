@@ -64,10 +64,10 @@ static void rds_demo_task(void* arg)
     RDSAssembler::setTP(true);       // Traffic Program
     RDSAssembler::setTA(false);      // No current Traffic Announcement
     RDSAssembler::setMS(true);       // Music
-    RDSAssembler::setPS("MYRADIO "); // 8 chars, padded with space
+    RDSAssembler::setPS("PIRATE32"); // 8 chars, padded with space
 
     // A few rotating RadioText messages (64 chars max; padded internally)
-    static const char* kRT[] = {"Hello from ESP32 S3 FM Stereo + RDS encoder!",
+    static const char* kRT[] = {"Hello from ESP32 FM Stereo RDS encoder!",
                                 "This is a demo RadioText. Enjoy the music!",
                                 "RDS running sample-synchronous at 57 kHz."};
     const int          n     = sizeof(kRT) / sizeof(kRT[0]);
@@ -148,8 +148,8 @@ void setup()
     // Runs independently on Core 0 for deterministic timing
     // Priority 6: Highest priority (audio cannot be interrupted)
     DSP_pipeline::startTask(0,    // core_id: Core 0 (dedicated audio core)
-                           6,    // priority: Highest priority
-                           12288 // stack_words: 12KB stack (DSP buffers + FreeRTOS overhead)
+                            6,    // priority: Highest priority
+                            12288 // stack_words: 12KB stack (DSP buffers + FreeRTOS overhead)
     );
 
     // At this point, all three tasks are running independently
