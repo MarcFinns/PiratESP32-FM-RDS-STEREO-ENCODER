@@ -1,4 +1,59 @@
-// TaskStats.h
+/*
+ * =====================================================================================
+ *
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      FreeRTOS Task Performance Statistics
+ *
+ * =====================================================================================
+ *
+ * File:         TaskStats.h
+ * Description:  Real-time task CPU utilization and stack usage monitoring
+ *
+ * Purpose:
+ *   This module provides non-blocking access to FreeRTOS runtime statistics for
+ *   monitoring task CPU load, stack watermarks, and core utilization on dual-core
+ *   ESP32. It enables real-time diagnostics without halting audio processing.
+ *
+ * Monitored Tasks and Cores:
+ *   • Core 0 (Real-Time Audio): Runs DSP_pipeline at 48 kHz → 192 kHz conversion
+ *   • Core 1 (I/O Services): Runs Logger and VUMeter tasks for display/error reporting
+ *   • Per-task CPU%: Relative CPU time for named tasks (audio, logger, vu)
+ *   • Per-task stack: Free stack space (in 32-bit words for ESP32 FreeRTOS)
+ *
+ * Data Collection:
+ *   collect() samples runtime statistics if FreeRTOS is configured with
+ *   configGENERATE_RUN_TIME_STATS enabled. This requires:
+ *     • A timer tick counter (usually from Timer 0 or similar)
+ *     • Periodic sampling of task state (handled by FreeRTOS kernel)
+ *
+ *   Returns:
+ *     • true: Statistics valid and collection succeeded
+ *     • false: Runtime stats disabled or collection skipped (no data)
+ *
+ * CPU% Calculation:
+ *   CPU% = (task_run_time / total_run_time) × 100
+ *   On dual-core ESP32:
+ *     • core0_load ≈ DSP_pipeline CPU% (should be 80–95% for normal streaming)
+ *     • core1_load ≈ Logger + VUMeter + other I/O (typically 10–30%)
+ *
+ * Stack Watermark:
+ *   Free stack space (in 32-bit words):
+ *     • If < 512 words (~2 KB): Warning, potential overflow risk
+ *     • Normal: 1000–4000 words depending on task
+ *
+ * Thread Safety:
+ *   Thread-safe for reading via non-blocking FreeRTOS API. Data is a snapshot;
+ *   subsequent calls may return different values. init() must be called once
+ *   during setup (idempotent).
+ *
+ * Limitations:
+ *   • Requires FreeRTOS runtime stats enabled (configGENERATE_RUN_TIME_STATS)
+ *   • CPU% accuracy depends on timer resolution
+ *   • Not available on non-ESP32 platforms
+ *
+ * =====================================================================================
+ */
+
 #pragma once
 
 #include <cstdint>

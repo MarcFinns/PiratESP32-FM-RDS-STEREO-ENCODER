@@ -1,26 +1,62 @@
 /*
  * =====================================================================================
  *
- *                              RDS Synthesizer (Core 0)
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                     RDS 57 kHz Subcarrier Synthesizer
  *
  * =====================================================================================
  *
- * Purpose
- *   Generates the 57 kHz RDS injection signal synchronously inside the audio
- *   pipeline (192 kHz block rate). Reads bits from the RDSAssembler FIFO via a
- *   non‑blocking API and applies line coding + baseband shaping before
- *   up‑converting to 57 kHz.
+ * File:         RDSSynth.h
+ * Description:  RDS (Radio Data System) baseband synthesizer and upconverter
  *
- * Signal Path
- *   bits → differential → Manchester (bi‑phase mark) → LPF (baseband) → × cos(57 kHz)
- *        → scale → add to MPX
+ * Purpose:
+ *   This module generates the 57 kHz RDS injection signal synchronously within the
+ *   audio processing pipeline (Core 0, 192 kHz block rate). It implements the complete
+ *   RDS encoding chain:
+ *     • Bit-to-symbol conversion with differential Manchester encoding (bi-phase mark)
+ *     • Symbol-rate timing generation (1187.5 bps, matched to FM multiplex structure)
+ *     • Baseband shaping via cascaded biquad lowpass filters (~4 kHz cutoff)
+ *     • Up-conversion to 57 kHz via coherent carrier multiplication
  *
- * Notes
- *   - Coherent 57 kHz carrier (3× pilot) is precomputed in DSP_pipeline from the
- *     master NCO (19 kHz). This guarantees exact 3× phase lock.
- *   - Baseband shaping uses two biquads via esp‑dsp for low CPU cost.
+ * Signal Path:
+ *   RDS bits → Differential encoder → Manchester line coder → Baseband LPF (2× biquad)
+ *              → Amplitude modulation (×57 kHz carrier) → Scale → Output buffer
  *
+ * Carrier Synchronization:
+ *   The 57 kHz RDS carrier is derived from the master 19 kHz NCO harmonics (3× pilot).
+ *   This ensures perfect frequency and phase coherence with the FM stereo pilot tone,
+ *   critical for FM receiver compatibility and to prevent self-interference.
+ *
+ * RDS Format (RBDS):
+ *   • Bit rate: 1187.5 bps (= 19 kHz pilot frequency ÷ 16)
+ *   • Modulation: BPSK on 57 kHz subcarrier (binary phase shift keying)
+ *   • Line code: Differential Manchester (bi-phase mark), prevents DC bias
+ *   • Blocks: Group blocks (4 blocks per group), error correction via syndrome bits
+ *
+ * Symbol Timing (Manchester):
+ *   Each RDS bit is represented as 1 Manchester symbol (2 transitions per symbol):
+ *     • Symbol period: 1 ÷ 1187.5 ≈ 842 µs @ 48 kHz = 40.32 samples
+ *     • At 192 kHz: 161.28 samples per symbol (not integer, so phase accumulation)
+ *   The module uses a normalized phase accumulator [0,1) for continuous symbol timing.
+ *
+ * Baseband Shaping (Biquad Cascade):
+ *   Two second-order IIR lowpass filters (Butterworth-like) with ~4 kHz cutoff:
+ *     • Total order: 4 (2 poles/pair)
+ *     • Purpose: Bandlimit RDS baseband to prevent aliasing and RF splatter
+ *     • Coefficients: Pre-computed via dsps_biquad_gen_lpf_f32 or similar
+ *
+ * Thread Safety:
+ *   Not thread-safe. Must be called exclusively from Core 0 audio pipeline.
+ *   configure() and reset() must not be called while processBlockWithCarrier()
+ *   is executing. The RDSAssembler dependency (bits) is read via non-blocking API.
+ *
+ * Integration:
+ *   DSP_pipeline provides the coherent 57 kHz carrier and calls processBlockWithCarrier()
+ *   at 192 kHz block rate. The output is mixed into the MPX signal before I2S TX.
+ *
+ * =====================================================================================
  */
+
 #pragma once
 
 #include <cstddef>

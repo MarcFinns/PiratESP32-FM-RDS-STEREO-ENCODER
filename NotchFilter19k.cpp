@@ -1,7 +1,7 @@
 /*
  * =====================================================================================
  *
- *                            ESP32 RDS STEREO ENCODER
+ *                      PiratESP32 - FM RDS STEREO ENCODER
  *                  19 kHz Stereo Pilot Notch Filter Implementation
  *
  * =====================================================================================
@@ -200,33 +200,8 @@ void NotchFilter19k::process(float* buffer, std::size_t frames)
      * Trade-off: If frames > 64, we employ a conservative fallback (pass-through).
      * This should never happen with typical CONFIG::BLOCK_SIZE settings.
      */
-    const int N = static_cast<int>(frames);
-    float     left[64];
-    float     right[64];
-
-    // Guard against unexpectedly large frame counts
-    if (frames > 64)
-    {
-        /*
-         * Conservative Fallback (Pass-Through)
-         *
-         * If frame count exceeds our buffer capacity, we skip filtering entirely.
-         * This is a safety net to prevent buffer overflow or undefined behavior.
-         *
-         * In production:
-         *   • This code path should never execute (CONFIG::BLOCK_SIZE ≤ 64 frames)
-         *   • If it does, log a warning and revisit block size configuration
-         *
-         * Note: The current fallback is a no-op (buffer unchanged).
-         * Consider replacing with dynamic allocation or error signaling if needed.
-         */
-        for (std::size_t i = 0; i < frames; ++i)
-        {
-            buffer[i * 2 + 0] = buffer[i * 2 + 0];
-            buffer[i * 2 + 1] = buffer[i * 2 + 1];
-        }
-        return;
-    }
+    float left[64];
+    float right[64];
 
     /*
      * Deinterleave Stereo Input
@@ -240,52 +215,34 @@ void NotchFilter19k::process(float* buffer, std::size_t frames)
      *
      * This layout is required by dsps_biquad_f32_aes3() for SIMD processing.
      */
-    for (int i = 0; i < N; ++i)
+    // Process in chunks of up to 64 frames to avoid large stack buffers
+    std::size_t processed = 0;
+    while (processed < frames)
     {
-        left[i]  = buffer[i * 2 + 0];
-        right[i] = buffer[i * 2 + 1];
-    }
+        std::size_t chunk = frames - processed;
+        if (chunk > 64)
+            chunk = 64;
 
-    /*
-     * Apply Notch Filter via ESP-IDF SIMD Biquad
-     *
-     * Function: dsps_biquad_f32_aes3(input, output, length, coef, state)
-     *
-     * Parameters:
-     *   input (float*): Mono input samples (e.g., left[])
-     *   output (float*): Filtered mono output (same array for in-place filtering)
-     *   length (int): Number of samples to filter (N)
-     *   coef (float*): Biquad coefficients {b0, b1, b2, a1, a2}
-     *   state (float*): Filter state array (persistent across calls, e.g., wL_)
-     *
-     * Implementation:
-     *   • Uses ESP32-S3 Advanced Encryption Standard Instructions (AES3) or equivalent SIMD
-     *   • Processes multiple samples per cycle using vector registers
-     *   • State is preserved across calls → continuous filtering across audio blocks
-     *   • In-place filtering reduces memory bandwidth
-     *
-     * Continuity:
-     *   The state vectors (wL_, wR_) persist between calls, ensuring continuous
-     *   filtering across frames. This prevents clicks/pops at frame boundaries.
-     */
-    dsps_biquad_f32_aes3(left, left, N, coef_, wL_);
-    dsps_biquad_f32_aes3(right, right, N, coef_, wR_);
+        // Deinterleave current chunk
+        for (std::size_t i = 0; i < chunk; ++i)
+        {
+            std::size_t idx = (processed + i) * 2;
+            left[i] = buffer[idx + 0];
+            right[i] = buffer[idx + 1];
+        }
 
-    /*
-     * Reinterleave Filtered Audio
-     *
-     * Convert back from separate arrays:
-     *   left:  [L₀', L₁', L₂', ...]
-     *   right: [R₀', R₁', R₂', ...]
-     *
-     * To interleaved layout:
-     *   buffer: [L₀', R₀', L₁', R₁', L₂', R₂', ...]
-     *
-     * This matches the expected output format for downstream DSP modules.
-     */
-    for (int i = 0; i < N; ++i)
-    {
-        buffer[i * 2 + 0] = left[i];
-        buffer[i * 2 + 1] = right[i];
+        // Apply notch filter to chunk
+        dsps_biquad_f32_aes3(left, left, (int)chunk, coef_, wL_);
+        dsps_biquad_f32_aes3(right, right, (int)chunk, coef_, wR_);
+
+        // Reinterleave filtered chunk back into buffer
+        for (std::size_t i = 0; i < chunk; ++i)
+        {
+            std::size_t idx = (processed + i) * 2;
+            buffer[idx + 0] = left[i];
+            buffer[idx + 1] = right[i];
+        }
+
+        processed += chunk;
     }
 }

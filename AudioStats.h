@@ -1,3 +1,42 @@
+/*
+ * =====================================================================================
+ *
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                         Audio Pipeline Performance Statistics
+ *
+ * =====================================================================================
+ *
+ * File:         AudioStats.h
+ * Description:  Real-time performance profiling structures for DSP pipeline stages
+ *
+ * Purpose:
+ *   This module defines data structures for monitoring and reporting the performance
+ *   characteristics of the 8-stage audio processing pipeline (48 kHz input to 192 kHz
+ *   output). It tracks per-stage timing (min/max/current), loop counters, and gain
+ *   information for diagnostic and performance optimization purposes.
+ *
+ * Design Pattern: Data Structure Only
+ *   AudioStats is a pure data container with in-place measurement methods. It does not
+ *   perform I/O or allocate dynamic memory, making it safe for real-time use in
+ *   interrupt contexts or on Core 0.
+ *
+ * Thread Safety:
+ *   Not thread-safe. Should be accessed only from Core 0 audio processing task.
+ *   Core 1 I/O tasks read-only via SystemContext (assumes snapshot atomicity).
+ *
+ * Performance Metrics:
+ *   • stage_int_to_float: I2S RX → float conversion
+ *   • stage_preemphasis: Pre-emphasis IIR filter (48 kHz)
+ *   • stage_notch: 19 kHz notch filter (48 kHz)
+ *   • stage_matrix: Stereo matrix L+R/L-R decomposition
+ *   • stage_mpx: FM multiplex signal construction (pilot + subcarrier + RDS)
+ *   • stage_upsample: 4× polyphase FIR upsampler (48 kHz → 192 kHz)
+ *   • stage_float_to_int: float → I2S TX conversion
+ *   • stage_rds: RDS bitstream injection and synthesis
+ *
+ * =====================================================================================
+ */
+
 #pragma once
 
 #include <cstdint>

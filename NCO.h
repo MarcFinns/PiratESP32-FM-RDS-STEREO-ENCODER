@@ -1,3 +1,52 @@
+/*
+ * =====================================================================================
+ *
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                   Numerically Controlled Oscillator (NCO) with Harmonics
+ *
+ * =====================================================================================
+ *
+ * File:         NCO.h
+ * Description:  Master phase-coherent tone generator for FM multiplex carriers
+ *
+ * Purpose:
+ *   This module implements a high-performance numerically controlled oscillator (NCO)
+ *   that generates coherent harmonics required for FM stereo and RDS synthesis:
+ *     • 19 kHz stereo pilot tone (fundamental)
+ *     • 38 kHz subcarrier for L-R modulation (2× pilot, ensures DSB-SC coherence)
+ *     • 57 kHz RDS carrier (3× pilot, maintains phase lock with pilot and subcarrier)
+ *
+ *   The use of harmonics derived from a single master phase ensures perfect frequency
+ *   and phase relationships across all carriers, critical for FM receiver compatibility.
+ *
+ * NCO Principles:
+ *   A numerically controlled oscillator maintains a normalized phase accumulator
+ *   that rotates through [0,1) representing a complete 2π rotation:
+ *     phase[n+1] = (phase[n] + phase_increment) mod 1.0
+ *     output = cos(2π · phase)
+ *
+ *   This discrete-time approach is exact and requires no trigonometric functions
+ *   (phase_increment is precomputed from f_desired and f_sample at initialization).
+ *
+ * Waveform Synthesis:
+ *   • Cosine LUT: 1024-entry sine table with linear interpolation
+ *   • Harmonic generation: cos(1×phase), cos(2×phase), cos(3×phase) computed
+ *     from single master phase in one pass
+ *   • Output range: [-1.0, 1.0]
+ *
+ * Thread Safety:
+ *   Not thread-safe for configuration changes. setFrequency() and reset() must
+ *   not be called while generate_harmonics() is executing. Safe for read-only
+ *   phase access via phase() and phaseInc() getters.
+ *
+ * Performance:
+ *   • Stateless for rapid re-tuning (pre-computed phase_inc_)
+ *   • 1024-entry LUT fits in L1 cache
+ *   • 12 multiplications per output sample (3 harmonics × 4 ops each)
+ *
+ * =====================================================================================
+ */
+
 #pragma once
 
 #include <cstddef>

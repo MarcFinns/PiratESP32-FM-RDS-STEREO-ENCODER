@@ -1,12 +1,12 @@
 /*
  * =====================================================================================
  *
- *                            ESP32 RDS STEREO ENCODER
+ *                      PiratESP32 - FM RDS STEREO ENCODER
  *                              Main Application
  *
  * =====================================================================================
  *
- * File:         ESP32_RDS_STEREO_SW_ENCODER_GIT.ino
+ * File:         PiratESP32-FM-RDS-STEREO-ENCODER.ino
  * Description:  Entry point for ESP32 FM stereo encoder with real-time DSP
  *
  * Overview:
@@ -53,10 +53,11 @@
 #include "ESP32I2SDriver.h"
 #include "Log.h"
 #include "RDSAssembler.h"
+#include "SystemContext.h"
 #include "VUMeter.h"
 
 // Optional: RDS helper/demo task (Core 1)
-static void rds_demo_task(void* arg)
+static void rds_demo_task(void *arg)
 {
     (void)arg;
     // Initial service identification
@@ -68,12 +69,12 @@ static void rds_demo_task(void* arg)
     RDSAssembler::setPS("PiratESP"); // 8 chars, padded with space
 
     // A few rotating RadioText messages (64 chars max; padded internally)
-    static const char* kRT[] = {"Hello from ESP32 FM Stereo RDS encoder!",
+    static const char *kRT[] = {"Hello from ESP32 FM Stereo RDS encoder!",
                                 "Fully digital signal processing pipeline",
                                 "This is a demo RadioText. Enjoy the music!"};
 
-    const int n   = sizeof(kRT) / sizeof(kRT[0]);
-    int       idx = 0;
+    const int n = sizeof(kRT) / sizeof(kRT[0]);
+    int idx = 0;
 
     // Initial RT
     RDSAssembler::setRT(kRT[idx]);
@@ -94,11 +95,12 @@ static void rds_demo_task(void* arg)
 /**
  * Initialize hardware and start FreeRTOS tasks
  *
- * Task Startup Order:
- *   1. Serial communication (for logging)
- *   2. Logger task (core 1, priority 2)
- *   3. VU Meter task (core 1, priority 1)
- *   4. DSP_pipeline task (core 0, priority 6)
+ * Uses SystemContext (IoC Container) to manage all module initialization.
+ * This centralized approach ensures:
+ *   • Consistent startup order
+ *   • Proper dependency injection
+ *   • Clear lifecycle management
+ *   • Easy to test with mock drivers
  *
  * Core Assignment Strategy:
  *   • Core 0: Dedicated to audio processing (no interruptions)
@@ -112,57 +114,55 @@ void setup()
     Serial.begin(115200);
     delay(100); // Allow Serial to stabilize
 
-    // ---- Start Logger Task (Core 1) ----
-    // Handles all Serial.print() calls from audio thread via queue
-    // Queue size: 128 messages (prevents audio blocking on logging)
-    // Priority 2: Higher than VU meter, lower than audio
-    Log::startTask(1,    // core_id: Core 1 (I/O core)
-                   2,    // priority: Medium priority
-                   4096, // stack_words: 4KB stack
-                   128   // queue_len: 128 message buffer
-    );
-
-    // ---- Start VU Meter Task (Core 1) ----
-    // Renders real-time audio levels on ILI9341 display
-    // Queue size: 1 (mailbox pattern - only latest sample matters)
-    // Priority 1: Lower than logger (visual feedback can wait)
-    VUMeter::startTask(1,    // core_id: Core 1 (same as logger)
-                       1,    // priority: Low priority
-                       4096, // stack_words: 4KB stack
-                       1     // queue_len: Single-slot mailbox
-    );
-
-    // ---- Start RDS Assembler Task (Core 1) ----
-    // Non-real-time task to build RDS bitstream; audio core will synthesize
-    if (Config::ENABLE_RDS_57K)
-    {
-        RDSAssembler::startTask(1,    // core_id: Core 1
-                                1,    // priority: Low
-                                4096, // stack_words
-                                1024  // bit queue length
-        );
-
-        // Spawn the helper on Core 1 with low priority and modest stack
-        xTaskCreatePinnedToCore(rds_demo_task, "rds_demo", 2048, nullptr, 1, nullptr, 1);
-    }
-
-    // ---- Start Audio Engine Task (Core 0) ----
-    // Real-time audio processing - highest priority
-    // Runs independently on Core 0 for deterministic timing
-    // Priority 6: Highest priority (audio cannot be interrupted)
-
-    // Create hardware I/O driver (injected dependency)
+    // ---- Initialize System Context with Dependency Injection ----
+    // Create and inject the hardware I/O driver
     static ESP32I2SDriver hw_driver;
 
-    // Start audio pipeline with injected hardware driver
-    DSP_pipeline::startTask(&hw_driver,  // hardware_driver: Injected I/O driver
-                            0,           // core_id: Core 0 (dedicated audio core)
-                            6,           // priority: Highest priority
-                            12288        // stack_words: 12KB stack (DSP buffers + FreeRTOS overhead)
-    );
+    // Get the singleton SystemContext instance
+    SystemContext &system = SystemContext::getInstance();
 
-    // At this point, all three tasks are running independently
-    // Arduino loop() becomes idle and yields to FreeRTOS scheduler
+    // Initialize all system modules through the IoC container
+    // This will start:
+    //   1. Hardware driver (I2S initialization)
+    //   2. Logger task (Core 1, priority 2)
+    //   3. VU Meter task (Core 1, priority 1)
+    //   4. RDS Assembler task (Core 1, priority 1) if enabled
+    //   5. DSP Pipeline task (Core 0, priority 6)
+    bool initialized =
+        system.initialize(&hw_driver,            // Injected hardware I/O driver
+                          0,                     // dsp_core_id: Core 0 (dedicated audio)
+                          6,                     // dsp_priority: Highest priority
+                          12288,                 // dsp_stack_words: 12KB for DSP buffers
+                          Config::ENABLE_RDS_57K // enable_rds: Enable RDS if configured
+        );
+
+    if (!initialized)
+    {
+        // Initialization failed - log error and halt
+        // In production, might implement watchdog recovery or graceful degradation
+        while (true)
+        {
+            Serial.println("FATAL: System initialization failed!");
+            delay(1000);
+        }
+    }
+
+    // ---- Start RDS Demo Task (Optional) ----
+    // Only spawn demo task if RDS is enabled
+    if (Config::ENABLE_RDS_57K)
+    {
+        // Spawn the RDS demo helper on Core 1 with low priority
+        xTaskCreatePinnedToCore(rds_demo_task, // Task function
+                                "rds_demo",    // Task name
+                                2048,          // Stack size in words
+                                nullptr,       // Task parameter
+                                1,             // Priority (low)
+                                nullptr,       // Task handle (not needed)
+                                1);            // Core ID (Core 1)
+    }
+
+    // At this point, all system modules are running and ready
+    // Arduino loop() will yield to FreeRTOS scheduler
 }
 
 // ==================================================================================

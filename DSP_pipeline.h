@@ -1,7 +1,7 @@
 /*
  * =====================================================================================
  *
- *                            ESP32 RDS STEREO ENCODER
+ *                      PiratESP32 - FM RDS STEREO ENCODER
  *                          Audio Engine Interface
  *
  * =====================================================================================
@@ -21,8 +21,8 @@
  *   4. Notch: Remove 19 kHz content to prevent pilot tone interference
  *   5. Upsample: 48 kHz → 192 kHz using 4× polyphase FIR filter
  *   6. Matrix: Generate L+R (mono) and L-R (stereo difference) signals
-     *   7. NCO: Generate coherent 19/38/57 kHz carriers (harmonics from pilot)
-     *   8. MPX: Mix mono + pilot + (L-R × 38 kHz) and inject RDS (57 kHz)
+ *   7. NCO: Generate coherent 19/38/57 kHz carriers (harmonics from pilot)
+ *   8. MPX: Mix mono + pilot + (L-R × 38 kHz) and inject RDS (57 kHz)
  *   9. Convert: float32 → int32 (normalized float to Q31 fixed-point)
  *  10. I2S TX: Write 192 kHz stereo to DAC (256 sample pairs = 1.33 ms)
  *
@@ -60,16 +60,16 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "Config.h"
 #include "AudioStats.h"
+#include "Config.h"
+#include "IHardwareDriver.h" // Hardware abstraction layer
 #include "MPXMixer.h"
 #include "NCO.h"
 #include "NotchFilter19k.h"
 #include "PolyphaseFIRUpsampler.h"
 #include "PreemphasisFilter.h"
-#include "StereoMatrix.h"
 #include "RDSSynth.h"
-#include "IHardwareDriver.h"  // Hardware abstraction layer
+#include "StereoMatrix.h"
 
 // ==================================================================================
 //                          AUDIO ENGINE CLASS
@@ -104,10 +104,25 @@
  *   Available time: 1333 µs (64 samples ÷ 48000 samples/sec)
  *   CPU usage: ~22% (300 µs ÷ 1333 µs)
  *   Headroom: ~78% (margin for system jitter and interrupts)
+ *
+ * Queue Overflow Behavior:
+ *   VU meter samples and statistics snapshots are sent via mailbox (overwrite) queues.
+ *   When the display task cannot consume samples fast enough:
+ *   • Older samples are discarded and overwritten with newer ones
+ *   • Consumer (VU display task) always sees the most recent audio levels
+ *   • Prevents display lag and maintains responsive UI
+ *   • Tradeoff: May miss transient peak captures if display can't keep up
+ *
+ * Communication Patterns (All via FreeRTOS Queues):
+ *   • SENDS TO: VUMeter (audio levels, statistics)
+ *   • SENDS TO: Logger (performance metrics, diagnostics)
+ *   • READS FROM: RDSAssembler (RDS bit stream for injection)
+ *   • READS FROM: Hardware driver (audio samples)
+ *   Queue operations are non-blocking with overwrite semantics
  */
 class DSP_pipeline
 {
-public:
+  public:
     // ==================================================================================
     //                          PUBLIC INTERFACE
     // ==================================================================================
@@ -125,7 +140,7 @@ public:
      * Note: Buffers are zero-initialized by default (BSS section).
      *       hardware_driver must remain valid for the lifetime of DSP_pipeline.
      */
-    explicit DSP_pipeline(IHardwareDriver* hardware_driver);
+    explicit DSP_pipeline(IHardwareDriver *hardware_driver);
 
     /**
      * Initialize Audio Engine
@@ -223,10 +238,10 @@ public:
      *
      * Note: hardware_driver must remain valid for the lifetime of the audio task.
      */
-    static bool startTask(IHardwareDriver* hardware_driver, int core_id, UBaseType_t priority,
+    static bool startTask(IHardwareDriver *hardware_driver, int core_id, UBaseType_t priority,
                           uint32_t stack_words);
 
-private:
+  private:
     // ==================================================================================
     //                          INTERNAL HELPER FUNCTIONS
     // ==================================================================================
@@ -247,9 +262,7 @@ private:
      *   [timestamp] DSP_pipeline: 48000 Hz, CPU 22.5%, Headroom 77.5%
      *   [timestamp] Peak: L=-12.3 dBFS, R=-14.1 dBFS
      */
-    void printPerformance(std::size_t frames_read,
-                          float available_us,
-                          float cpu_usage,
+    void printPerformance(std::size_t frames_read, float available_us, float cpu_usage,
                           float cpu_headroom);
 
     /**
@@ -275,12 +288,34 @@ private:
      *
      * Note: This function is only available when DIAGNOSTIC_PRINT_INTERVAL > 0.
      */
-    void printDiagnostics(std::size_t frames_read,
-                          int32_t peak_adc,
-                          int32_t peak_pre,
-                          int32_t peak_fir,
-                          float pre_db,
-                          float total_db);
+    void printDiagnostics(std::size_t frames_read, int32_t peak_adc, int32_t peak_pre,
+                          int32_t peak_fir, float pre_db, float total_db);
+
+    // ==================================================================================
+    //                      ORCHESTRATION HELPER METHODS
+    // ==================================================================================
+
+    /**
+     * Read and convert audio from ADC, calculate VU levels
+     */
+    bool readAndConvertAudio(std::size_t &frames_read, float &l_peak, float &r_peak, float &l_rms,
+                             float &r_rms);
+
+    /**
+     * Update VU meter display with audio levels
+     */
+    void updateVUMeters(float l_peak, float r_peak, float l_rms, float r_rms,
+                        std::size_t frames_read);
+
+    /**
+     * Convert and write audio to DAC with clipping
+     */
+    void convertAndWriteDAC(std::size_t frames_read);
+
+    /**
+     * Update performance metrics and logs
+     */
+    void updatePerformanceMetrics(uint32_t total_us, std::size_t frames_read);
 
     // ==================================================================================
     //                          DSP PIPELINE MODULES
@@ -319,7 +354,7 @@ private:
     // ---- Hardware I/O Driver ----
     // Abstraction layer for I2S operations (injected dependency)
     // Enables testing and hardware independence
-    IHardwareDriver* hardware_driver_;
+    IHardwareDriver *hardware_driver_;
 
     // ==================================================================================
     //                          AUDIO BUFFERS (16-BYTE ALIGNED)
