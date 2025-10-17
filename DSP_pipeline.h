@@ -308,9 +308,16 @@ class DSP_pipeline
                         std::size_t frames_read);
 
     /**
-     * Convert and write audio to DAC with clipping
+     * Convert float samples to int32 Q31 (computation only, no I/O)
+     * Separated from I/O to properly measure conversion performance vs. I2S blocking time
      */
-    void convertAndWriteDAC(std::size_t frames_read);
+    void convertFloatToInt32(std::size_t frames_read);
+
+    /**
+     * Write samples to I2S DAC
+     * Separated from conversion to properly measure I/O blocking time
+     */
+    void writeToDAC(std::size_t frames_read);
 
     /**
      * Update performance metrics and logs

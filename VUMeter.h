@@ -412,8 +412,8 @@ class VUMeter : public ModuleBase
     uint32_t stack_words_;      ///< Stack size in words
 
     // Display resources (initialized in begin())
-    Arduino_DataBus* bus_ = nullptr;
-    Arduino_GFX* gfx_ = nullptr;
+    Arduino_DataBus *bus_ = nullptr;
+    Arduino_GFX *gfx_ = nullptr;
 
     // Error Tracking
     volatile uint32_t sample_overflow_count_; ///< Count of VU sample queue overflows
