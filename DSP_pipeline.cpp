@@ -266,16 +266,16 @@ void DSP_pipeline::updateVUMeters(float l_peak, float r_peak, float l_rms, float
 }
 
 /**
- * Convert float samples to int32 Q31, write to DAC
+ * Convert float samples to int32 Q31 (conversion only, no I/O)
  *
  * Optimized for performance: simplified direct conversion without intermediate
  * accumulation or nested min/max operations. The DSP pipeline upstream ensures
  * output levels stay within [-1.0, 1.0] via proper gain staging, so additional
  * clipping here is redundant.
  *
- * Performance: ~30-50 µs for 512 samples (previously ~575 µs)
+ * Performance: ~30-50 µs for 512 samples
  */
-void DSP_pipeline::convertAndWriteDAC(std::size_t frames_read)
+void DSP_pipeline::convertFloatToInt32(std::size_t frames_read)
 {
     using namespace Config;
 
@@ -295,6 +295,16 @@ void DSP_pipeline::convertAndWriteDAC(std::size_t frames_read)
             v = -1.0f;
         tx_buffer_[i] = static_cast<int32_t>(v * Q31_SCALE);
     }
+}
+
+/**
+ * Write samples to I2S DAC
+ *
+ * Separated from conversion to properly measure I/O blocking time vs. computation.
+ */
+void DSP_pipeline::writeToDAC(std::size_t frames_read)
+{
+    using namespace Config;
 
     size_t bytes_to_write = frames_read * UPSAMPLE_FACTOR * 2 * BYTES_PER_SAMPLE;
     size_t bytes_written = 0;
@@ -305,12 +315,12 @@ void DSP_pipeline::convertAndWriteDAC(std::size_t frames_read)
         int err = hardware_driver_->getErrorStatus();
         if (err == ESP_ERR_TIMEOUT)
         {
-            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::convertAndWriteDAC",
+            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::writeToDAC",
                                    "I2S TX timeout");
         }
         else
         {
-            ErrorHandler::logError(ErrorCode::I2S_WRITE_ERROR, "DSP_pipeline::convertAndWriteDAC",
+            ErrorHandler::logError(ErrorCode::I2S_WRITE_ERROR, "DSP_pipeline::writeToDAC",
                                    "I2S TX write failed");
         }
         ++stats_.errors;
@@ -534,13 +544,19 @@ void DSP_pipeline::process()
     stats_.stage_mpx.update(stage_mpx_us);
 
     // ============================================================================
-    // STAGE 7: Float→Int Conversion + DAC Write
+    // STAGE 7: Float→Int Conversion (Computation Only)
     // ============================================================================
     t0 = t1;
-    convertAndWriteDAC(frames_read);
+    convertFloatToInt32(frames_read);
     t1 = ESP.getCycleCount();
     uint32_t stage4_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
     stats_.stage_float_to_int.update(stage4_us);
+
+    // ============================================================================
+    // STAGE 7b: I2S Write (Separate Measurement - Shows I/O Blocking Time)
+    // ============================================================================
+    // Note: This is NOT included in stage_float_to_int timing to show pure conversion cost
+    writeToDAC(frames_read);
 
     // ============================================================================
     // STAGE 8: Performance Monitoring & Metrics Update
