@@ -88,7 +88,6 @@ constexpr int PIN_ADC_DIN = 5;  // ADC serial data input
  * Input Sample Rate (ADC)
  *
  * The rate at which audio samples are captured from the I2S ADC.
- * Standard CD-quality rate, optimal for speech and music.
  *
  * Value: 48,000 Hz (48 kHz)
  */
@@ -98,7 +97,7 @@ constexpr uint32_t SAMPLE_RATE_ADC = 48000;
  * Output Sample Rate (DAC)
  *
  * The rate at which processed audio is output to the I2S DAC.
- * 4x higher than input to accommodate FM multiplex bandwidth.
+ * 4x higher than input to accommodate FM multiplex bandwidth (38KHz and 57KHz subcarriers).
  *
  * Value: 192,000 Hz (192 kHz)
  */
@@ -158,22 +157,62 @@ constexpr uint32_t I2S_READ_TIMEOUT_MS = 5;  // RX timeout per read
 constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
 
 // ==================================================================================
-//                          TASK AND QUEUE SETTINGS
+//                     FREERTOS TASK ALLOCATION (CORE & PRIORITY)
 // ==================================================================================
-/** Logger task settings */
-constexpr uint32_t LOGGER_STACK_WORDS = 4096; // 16 KB
-constexpr uint32_t LOGGER_PRIORITY = 2;       // Medium priority
-constexpr std::size_t LOGGER_QUEUE_LEN = 128; // messages
+//
+// This section centralizes all task allocation decisions: core assignment and priority.
+// Each task has three configuration parameters:
+//   • CORE: Which CPU core (0 = audio, 1 = I/O)
+//   • PRIORITY: FreeRTOS priority level (0-25, higher = more priority)
+//   • STACK_WORDS: Stack memory in 32-bit words
+//
+// Core Assignment Strategy:
+//   Core 0: Audio processing (DSP_pipeline only - highest priority, no interruptions)
+//   Core 1: I/O operations (Logger, VU Meter, RDS - can block on I/O)
+//
+// Priority Strategy (FreeRTOS ESP32):
+//   Level 6: Audio DSP (real-time, cannot block, highest priority)
+//   Level 2: Logger (diagnostics, medium priority)
+//   Level 1: VU Meter, RDS (display/RDS generation, low priority, can block)
+//   Level 0: Idle task (system)
 
-/** VU meter task settings */
-constexpr uint32_t VU_STACK_WORDS = 4096;     // 16 KB
-constexpr uint32_t VU_PRIORITY = 1;           // Low priority
-constexpr std::size_t VU_QUEUE_LEN = 1;       // mailbox
+/** ---- LOGGER TASK ---- */
+/** Logger: Core Assignment */
+constexpr int LOGGER_CORE = 1;                          // Core 1 (I/O core)
+/** Logger: Task Priority */
+constexpr uint32_t LOGGER_PRIORITY = 2;                 // Medium priority
+/** Logger: Stack Size (32-bit words) */
+constexpr uint32_t LOGGER_STACK_WORDS = 4096;           // 16 KB
+/** Logger: Message Queue Capacity */
+constexpr std::size_t LOGGER_QUEUE_LEN = 128;           // 128 messages buffer
 
-/** RDS assembler task settings */
-constexpr uint32_t RDS_STACK_WORDS = 4096;    // 16 KB
-constexpr uint32_t RDS_PRIORITY = 1;          // Low priority
-constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024; // bits
+/** ---- VU METER TASK ---- */
+/** VU Meter: Core Assignment */
+constexpr int VU_CORE = 0;                              // Core 0 (can run on same core)
+/** VU Meter: Task Priority */
+constexpr uint32_t VU_PRIORITY = 1;                     // Low priority
+/** VU Meter: Stack Size (32-bit words) */
+constexpr uint32_t VU_STACK_WORDS = 4096;               // 16 KB
+/** VU Meter: Sample Queue (Mailbox Pattern) */
+constexpr std::size_t VU_QUEUE_LEN = 1;                 // Mailbox: holds only latest
+
+/** ---- RDS ASSEMBLER TASK ---- */
+/** RDS Assembler: Core Assignment */
+constexpr int RDS_CORE = 1;                             // Core 1 (I/O core)
+/** RDS Assembler: Task Priority */
+constexpr uint32_t RDS_PRIORITY = 1;                    // Low priority
+/** RDS Assembler: Stack Size (32-bit words) */
+constexpr uint32_t RDS_STACK_WORDS = 4096;              // 16 KB
+/** RDS Assembler: Bit Queue Capacity */
+constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024;         // 1024 bits buffer
+
+/** ---- DSP PIPELINE TASK ---- */
+/** DSP Pipeline: Core Assignment */
+constexpr int DSP_CORE = 0;                             // Core 0 (dedicated audio)
+/** DSP Pipeline: Task Priority */
+constexpr uint32_t DSP_PRIORITY = 6;                    // Highest priority
+/** DSP Pipeline: Stack Size (32-bit words) */
+constexpr uint32_t DSP_STACK_WORDS = 12288;             // 48 KB (DSP buffers)
 
 // ==================================================================================
 //                         PRE-EMPHASIS FILTER PARAMETERS
@@ -210,9 +249,11 @@ constexpr float PREEMPHASIS_TIME_CONSTANT_US = 50.0f;
 constexpr float exp_approx(float x)
 {
     // 1 + x + x^2/2! + x^3/3! + x^4/4! + x^5/5!
-    return 1.0f + x * (1.0f + x * (0.5f + x * (1.0f / 6.0f + x * (1.0f / 24.0f + x * (1.0f / 120.0f)))));
+    return 1.0f +
+           x * (1.0f + x * (0.5f + x * (1.0f / 6.0f + x * (1.0f / 24.0f + x * (1.0f / 120.0f)))));
 }
-constexpr float PREEMPHASIS_ALPHA = exp_approx(-1.0f / (PREEMPHASIS_TIME_CONSTANT_US * 1.0e-6f * SAMPLE_RATE_ADC));
+constexpr float PREEMPHASIS_ALPHA =
+    exp_approx(-1.0f / (PREEMPHASIS_TIME_CONSTANT_US * 1.0e-6f * SAMPLE_RATE_ADC));
 
 /**
  * Pre-emphasis Output Gain
@@ -220,9 +261,7 @@ constexpr float PREEMPHASIS_ALPHA = exp_approx(-1.0f / (PREEMPHASIS_TIME_CONSTAN
  * Compensates for the RMS level reduction caused by high-pass filtering.
  * Ensures consistent modulation depth across frequency spectrum.
  *
- * Value: 1.5x gain (reduced from 3.0x to eliminate shrillness)
- * Note: Original 3.0x was too aggressive and caused excessive treble boost.
- * A 1.5x gain is more natural and matches typical FM broadcast standards.
+ * A 1.5x gain matches typical FM broadcast standards.
  */
 constexpr float PREEMPHASIS_GAIN = 1.5f;
 
@@ -267,7 +306,7 @@ constexpr float NOTCH_RADIUS = 0.98f;
 //   • Stereo subcarrier: 23-53 kHz (38 kHz ± 15 kHz), DSB-SC with L-R
 
 /**
- * Feature toggles for MPX components
+ * Feature toggles for MPX components - used for debugging
  *
  * ENABLE_AUDIO: Includes program audio into the composite (mono and L-R)
  * ENABLE_STEREO_PILOT_19K: Includes the 19 kHz pilot tone

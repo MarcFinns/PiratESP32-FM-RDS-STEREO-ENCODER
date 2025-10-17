@@ -90,10 +90,7 @@ bool VUMeter::startTask(int core_id, uint32_t priority, uint32_t stack_words, si
     vu.stack_words_ = stack_words;
 
     // Spawn display task via ModuleBase helper
-    return vu.spawnTask("vu",
-                        (uint32_t)stack_words,
-                        (UBaseType_t)priority,
-                        core_id,
+    return vu.spawnTask("vu", (uint32_t)stack_words, (UBaseType_t)priority, core_id,
                         VUMeter::taskTrampoline);
 }
 
@@ -178,10 +175,11 @@ bool VUMeter::begin()
             gfx_->setTextColor(0xFFFF);
             gfx_->setTextSize(2);
             gfx_->setCursor(15, 10);
-            gfx_->print("PiratESP32 - FM RDS STEREO");
+            gfx_->print("PiratESP32 FM RDS STEREO");
 
             // Draw static scale
-            auto drawScale = [&]() {
+            auto drawScale = [&]()
+            {
                 static constexpr int DISPLAY_WIDTH = 320;
                 static constexpr int VU_Y = 32;
                 static constexpr int MARGIN_X = 16;
@@ -194,7 +192,8 @@ bool VUMeter::begin()
                 const int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
                 const int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
 
-                gfx_->fillRect(MARGIN_X, VU_L_Y, VU_WIDTH, (VU_BAR_HEIGHT * 2 + VU_BAR_SPACING), 0x0000);
+                gfx_->fillRect(MARGIN_X, VU_L_Y, VU_WIDTH, (VU_BAR_HEIGHT * 2 + VU_BAR_SPACING),
+                               0x0000);
 
                 gfx_->setTextWrap(false);
                 gfx_->setTextColor(0xFFFF);
@@ -208,7 +207,8 @@ bool VUMeter::begin()
                 for (int i = 0; i <= gridTicks; i++)
                 {
                     int x = MARGIN_X + VU_LABEL_WIDTH + (i * VU_BAR_WIDTH) / gridTicks;
-                    gfx_->drawFastVLine(x, VU_L_Y - 2, VU_BAR_HEIGHT * 2 + VU_BAR_SPACING + 4, 0x4208);
+                    gfx_->drawFastVLine(x, VU_L_Y - 2, VU_BAR_HEIGHT * 2 + VU_BAR_SPACING + 4,
+                                        0x4208);
                 }
 
                 int x0 = MARGIN_X + VU_LABEL_WIDTH;
@@ -217,7 +217,8 @@ bool VUMeter::begin()
                 gfx_->fillRect(x0, bandY, VU_BAR_WIDTH, bandH, 0x0000);
                 gfx_->drawFastHLine(x0, MID_SCALE_Y, VU_BAR_WIDTH, 0x7BEF);
 
-                auto dbToX_Scale = [&](float dB) {
+                auto dbToX_Scale = [&](float dB)
+                {
                     const float SCALE_MIN = -20.0f;
                     const float SCALE_MAX = 3.0f;
                     dB = std::max(SCALE_MIN, std::min(SCALE_MAX, dB));
@@ -394,7 +395,7 @@ void VUMeter::process()
         {
             gfx_->fillRect(barX - 1, barY - 1, VU_BAR_WIDTH + 2, VU_BAR_HEIGHT + 2, COLOR_BLACK);
             gfx_->drawRect(barX - 1, barY - 1, VU_BAR_WIDTH + 2, VU_BAR_HEIGHT + 2,
-                            COLOR_DARK_GRAY);
+                           COLOR_DARK_GRAY);
             gfx_->fillRect(barX, innerTop, VU_BAR_WIDTH, innerH, COLOR_BLACK);
         }
 
