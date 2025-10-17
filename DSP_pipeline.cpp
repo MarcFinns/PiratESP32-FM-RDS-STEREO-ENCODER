@@ -253,49 +253,6 @@ void DSP_pipeline::process()
         return; // Incomplete frame, skip processing
     }
 
-    // Optional: Carrier test output mode (bypass full pipeline)
-    if (Config::TEST_OUTPUT_CARRIERS)
-    {
-        std::size_t samples = frames_read * UPSAMPLE_FACTOR; // 192 kHz domain
-
-        // Generate coherent 19/38/57 kHz carriers from master NCO
-        pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_, samples);
-
-        // Left = 19 kHz pilot, Right = 38 kHz subcarrier
-        for (std::size_t i = 0; i < samples; ++i)
-        {
-            float L = Config::TEST_CARRIER_AMP * pilot_buffer_[i];
-            float R = Config::TEST_CARRIER_AMP * subcarrier_buffer_[i];
-            tx_f32_[i * 2 + 0] = L;
-            tx_f32_[i * 2 + 1] = R;
-        }
-
-        // Convert to Q31 and write to DAC
-        std::size_t out_samples = samples * 2; // stereo interleaved
-        for (std::size_t i = 0; i < out_samples; ++i)
-        {
-            float v = tx_f32_[i];
-            v       = std::min(0.9999999f, std::max(-1.0f, v));
-            tx_buffer_[i] = static_cast<int32_t>(v * 2147483647.0f);
-        }
-
-        size_t bytes_to_write = out_samples * BYTES_PER_SAMPLE;
-        size_t bytes_written  = 0;
-
-        // Write test carriers via hardware abstraction layer
-        if (!hardware_driver_->write(tx_buffer_, bytes_to_write, bytes_written))
-        {
-            ++stats_.errors;
-        }
-
-        if (bytes_written != bytes_to_write)
-        {
-            ++stats_.errors;
-        }
-        ++stats_.loops_completed;
-        return;
-    }
-
     // ============================================================================
     // Performance Timing Setup
     // ============================================================================
