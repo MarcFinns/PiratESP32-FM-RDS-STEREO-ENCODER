@@ -29,30 +29,17 @@
 
 #include "DSP_pipeline.h"
 #include "Diagnostics.h"
-#include "I2SDriver.h"
 #include "Log.h"
 #include "TaskStats.h"
+#include "VUMeter.h"
+#include "RDSSynth.h"
+
 #include <Arduino.h>
-#include <driver/i2s.h>
 #include <esp32-hal-cpu.h>
 #include <esp_timer.h>
 
 #include <algorithm>
 #include <cmath>
-
-#include "RDSSynth.h"
-#include "VUMeter.h"
-
-// ==================================================================================
-//                          I2S PORT CONFIGURATION
-// ==================================================================================
-
-namespace
-{
-    // I2S port assignments (ESP32-S3 has two independent I2S peripherals)
-    constexpr i2s_port_t kI2SPortTx = I2S_NUM_1;  // DAC output: 192 kHz stereo
-    constexpr i2s_port_t kI2SPortRx = I2S_NUM_0;  // ADC input: 48 kHz stereo
-} // namespace
 
 // ==================================================================================
 //                          CONSTRUCTOR
@@ -61,19 +48,26 @@ namespace
 /**
  * DSP_pipeline Constructor
  *
- * Initializes the audio processing pipeline with default settings.
+ * Initializes the audio processing pipeline with default settings and
+ * injected hardware driver dependency.
  * All buffers are zero-initialized by default (BSS section).
+ *
+ * Parameters:
+ *   hardware_driver:  Pointer to hardware I/O driver implementation
+ *                     (e.g., ESP32I2SDriver instance)
  *
  * Initialization:
  *   • pilot_19k_: NCO configured for 19 kHz pilot at 192 kHz sample rate
  *   • mpx_synth_: MPX mixer with pilot and stereo difference amplitudes
  *   • stats_: Performance statistics tracker (reset to zero)
+ *   • hardware_driver_: Stored for use in begin() and process()
  *
  * Note: Hardware I2S interfaces are NOT configured here. Call begin() to
- *       initialize I2S and load DSP filter coefficients.
+ *       initialize the hardware driver and load DSP filter coefficients.
  */
-DSP_pipeline::DSP_pipeline()
-    : pilot_19k_(19000.0f, static_cast<float>(Config::SAMPLE_RATE_DAC)),
+DSP_pipeline::DSP_pipeline(IHardwareDriver* hardware_driver)
+    : hardware_driver_(hardware_driver),
+      pilot_19k_(19000.0f, static_cast<float>(Config::SAMPLE_RATE_DAC)),
       mpx_synth_(Config::PILOT_AMP, Config::DIFF_AMP)
 {
     // Initialize performance statistics to zero
@@ -118,22 +112,11 @@ bool DSP_pipeline::begin()
     // Verify SIMD/ESP32-S3 specific optimizations are available
     Diagnostics::verifySIMD();
 
-    // Initialize I2S TX peripheral (DAC output at 192 kHz)
-    // Must be initialized BEFORE RX to establish MCLK reference
-    if (!AudioIO::setupTx())
+    // Initialize hardware I/O via abstraction layer
+    // Handles I2S TX (192 kHz DAC), I2S RX (48 kHz ADC), and MCLK setup
+    if (!hardware_driver_->initialize())
     {
-        Log::enqueue(Log::ERROR, "TX initialization failed!");
-        return false;
-    }
-
-    // Wait for master clock to stabilize before starting RX
-    // Critical for phase-locked loop (PLL) synchronization
-    delay(100);
-
-    // Initialize I2S RX peripheral (ADC input at 48 kHz)
-    if (!AudioIO::setupRx())
-    {
-        Log::enqueue(Log::ERROR, "RX initialization failed!");
+        Log::enqueue(Log::ERROR, "Hardware initialization failed!");
         return false;
     }
 
@@ -238,21 +221,20 @@ void DSP_pipeline::process()
     // I2S READ: Acquire Audio Data from ADC
     // ============================================================================
     //
-    // Read one block of stereo audio from the I2S RX peripheral (ADC).
-    // This call BLOCKS until the I2S DMA buffer has a complete block ready.
+    // Read one block of stereo audio from the hardware driver (I2S RX → ADC).
+    // This call BLOCKS until the DMA buffer has a complete block ready.
     // Typical latency: ~1.33 ms (one block period)
     //
     // Buffer format: int32_t interleaved stereo [L, R, L, R, ...]
     // Sample format: Q31 fixed-point (24-bit audio in 32-bit container)
     //
-    size_t    bytes_read = 0;
-    esp_err_t ret =
-        i2s_read(kI2SPortRx, rx_buffer_, sizeof(rx_buffer_), &bytes_read, portMAX_DELAY);
+    size_t bytes_read = 0;
 
-    // Check for I2S read errors
-    if (ret != ESP_OK)
+    // Read audio via hardware abstraction layer
+    if (!hardware_driver_->read(rx_buffer_, sizeof(rx_buffer_), bytes_read))
     {
-        Log::enqueuef(Log::ERROR, "Read error: %d", ret);
+        int err = hardware_driver_->getErrorStatus();
+        Log::enqueuef(Log::ERROR, "Read error: %d", err);
         ++stats_.errors;
         return; // Skip this cycle to maintain pipeline timing
     }
@@ -799,8 +781,8 @@ void DSP_pipeline::process()
     // STAGE 8: I2S Write (DAC Output)
     // ============================================================================
     //
-    // Write processed MPX signal to DAC via I2S TX peripheral.
-    // This call BLOCKS until the I2S DMA buffer has space available.
+    // Write processed MPX signal to DAC via hardware driver.
+    // This call BLOCKS until the DMA buffer has space available.
     //
     // Output format: 192 kHz stereo, Q31 fixed-point
     // Buffer size: 256 stereo frames × 2 channels × 4 bytes = 2048 bytes
@@ -808,13 +790,11 @@ void DSP_pipeline::process()
     size_t bytes_to_write = frames_read * UPSAMPLE_FACTOR * 2 * BYTES_PER_SAMPLE;
     size_t bytes_written  = 0;
 
-    // Write to I2S TX (blocking call)
-    ret = i2s_write(kI2SPortTx, tx_buffer_, bytes_to_write, &bytes_written, portMAX_DELAY);
-
-    // Check for I2S write errors
-    if (ret != ESP_OK)
+    // Write to DAC via hardware abstraction layer (blocking call)
+    if (!hardware_driver_->write(tx_buffer_, bytes_to_write, bytes_written))
     {
-        Log::enqueuef(Log::ERROR, "Write error: %d", ret);
+        int err = hardware_driver_->getErrorStatus();
+        Log::enqueuef(Log::ERROR, "Write error: %d", err);
         ++stats_.errors;
     }
 
@@ -1012,32 +992,33 @@ void DSP_pipeline::taskTrampoline(void* arg)
 }
 
 /**
- * Start Audio Task (Static Singleton Facade)
+ * Start Audio Task (Static with Hardware Driver)
  *
- * Convenience method that creates a managed DSP_pipeline singleton and spawns
- * its task. This is the recommended way to start the audio engine from main code.
- *
- * Singleton Pattern:
- *   A static DSP_pipeline instance is created on first call and reused thereafter.
- *   Only one audio engine can exist per application.
+ * Creates a DSP_pipeline instance with injected hardware driver and spawns its task.
+ * This is the recommended way to start the audio engine from main code.
  *
  * Parameters:
- *   core_id:      CPU core (must be 0 for audio)
- *   priority:     Task priority (typically 6, highest priority)
- *   stack_words:  Stack size in words (typically 12288 = 48 KB)
+ *   hardware_driver:  Hardware I/O implementation (e.g., ESP32I2SDriver)
+ *   core_id:          CPU core (must be 0 for audio)
+ *   priority:         Task priority (typically 6, highest priority)
+ *   stack_words:      Stack size in words (typically 12288 = 48 KB)
  *
  * Returns:
  *   true:  Audio task started successfully
  *   false: Task creation failed
  *
+ * Note: hardware_driver must remain valid for the lifetime of the audio task.
+ *
  * Example Usage:
  *   void setup() {
- *       DSP_pipeline::startTask(0, 6, 12288);  // Start audio on Core 0
+ *       ESP32I2SDriver driver;
+ *       DSP_pipeline::startTask(&driver, 0, 6, 12288);
  *   }
  */
-bool DSP_pipeline::startTask(int core_id, UBaseType_t priority, uint32_t stack_words)
+bool DSP_pipeline::startTask(IHardwareDriver* hardware_driver, int core_id, UBaseType_t priority,
+                             uint32_t stack_words)
 {
-    static DSP_pipeline s_instance;  // Singleton instance (created once)
+    static DSP_pipeline s_instance(hardware_driver);  // Create with driver dependency
     return s_instance.startTaskInstance(core_id, priority, stack_words);
 }
 
