@@ -1,17 +1,22 @@
 # PiratESP32 FM RDS STEREO ENCODER
 
-A professional-grade FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 microcontroller. This project processes stereo audio in real-time through a sophisticated DSP pipeline leveraging the ESP32-S3 SIMD achitecture, to generate broadcast-quality FM multiplex signals.
+A professional-grade FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 microcontroller. This project processes stereo audio in real-time through a sophisticated 24 bit DSP pipeline leveraging the ESP32-S3 SIMD architecture, to generate broadcast-quality FM multiplex signals.
 
 ## Features
 
-- **Real-time FM Stereo Encoding**: Processes stereo input to FM multiplex output
+- **Real-time FM Stereo Encoding**: Processes audio stereo input to FM multiplex output, ready to drive any FM transmitter
 - **RDS Support**: Transmits station information (PS, RT, PI, PTY) via RDS protocol
 - **Professional DSP Pipeline**:
+  - Audio sampling at 24 bit, 48KHz
   - 50 µs pre-emphasis filtering (European FM standard)
   - 19 kHz notch filter to prevent pilot tone interference
   - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
-  - FM multiplex synthesis with pilot tone and subcarrier
+  - FM multiplex synthesis with digitally synthesised, phase coherent 19KHz pilot tone and 38 KHz subcarrier
+  - RDS modulation on digitally synthesised 57 KHz subcarrier
+  -  Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and QPSK modulated 57 KHz subcarrier
+  -  MPX audio out via 32 bit DAC, 19 KHz
+  
 - **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring
 - **Dual-Core Architecture**: Optimized task distribution across ESP32's two cores
 - **Performance Monitoring**: Real-time CPU usage and audio statistics logging
@@ -24,7 +29,7 @@ A professional-grade FM stereo encoder with RDS (Radio Data System) support, imp
 
 ### Audio Interfaces
 - **ADC**: PCM1808 I2S audio ADC (24 bit, 48 kHz sample rate, I2S slave)
-- **DAC**: PCM5102A I2S audio DAC (24 bit, 192 kHz sample rate, I2S slave)
+- **DAC**: PCM5102A I2S audio DAC (16/24/32 bit, 192 kHz sample rate, I2S slave)
 - **Master Clock**: 24.576 MHz MCLK for synchronization (ESP32 is I2S master)
 
 ### Display (Optional)
