@@ -31,8 +31,8 @@ void MPXMixer::process(const float *mono,
     for (std::size_t i = 0; i < samples; ++i)
     {
         const float mono_term  = Config::ENABLE_AUDIO ? mono[i] : 0.0f;
-        const float pilot_term = Config::ENABLE_PILOT ? (pilot_amp_ * pilot_buffer[i]) : 0.0f;
-        const float dsb_term   = (Config::ENABLE_AUDIO && Config::ENABLE_SUBCARRIER_38K)
+        const float pilot_term = Config::ENABLE_STEREO_PILOT_19K ? (pilot_amp_ * pilot_buffer[i]) : 0.0f;
+        const float dsb_term   = (Config::ENABLE_AUDIO && Config::ENABLE_STEREO_SUBCARRIER_38K)
                                    ? (diff_amp_ * diff[i] * subcarrier_buffer[i])
                                    : 0.0f;
         mpx[i] = mono_term + pilot_term + dsb_term;

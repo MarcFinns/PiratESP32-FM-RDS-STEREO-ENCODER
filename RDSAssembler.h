@@ -78,6 +78,10 @@ void setPS(const char *ps);
 // Set Radio Text (up to 64 chars, padded or truncated by the builder)
 void setRT(const char *rt);
 
+// Set AF list (FM VHF, Method A). freqs_mhz: array of MHz (e.g., 101.1f).
+// Only 87.6–107.9 MHz are encoded (0.1 MHz step). Max 25 entries per spec.
+void setAF_FM(const float *freqs_mhz, std::size_t count);
+
 // Set Clock-Time (Group 4A). All parameters are local time (not UTC).
 // offset_half_hours: local time offset from UTC in 30‑minute steps (e.g., +2h = +4)
 void setClock(int year, int month, int day, int hour, int minute, int8_t offset_half_hours);
