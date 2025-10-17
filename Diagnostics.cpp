@@ -1,3 +1,50 @@
+/*
+ * =====================================================================================
+ *
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                       Diagnostic Utilities Implementation
+ *
+ * =====================================================================================
+ *
+ * File:         Diagnostics.cpp
+ * Description:  Runtime verification and analysis utilities for DSP pipeline
+ *
+ * Purpose:
+ *   This implementation provides diagnostic functions called during system startup
+ *   to verify SIMD acceleration availability and provide basic signal analysis
+ *   utilities for runtime monitoring and debugging.
+ *
+ * SIMD Verification:
+ *   verifySIMD() exercises the DSP library's SIMD-accelerated dot-product function
+ *   with 1000 iterations to measure performance. On ESP32-S3 with SIMD enabled,
+ *   this should complete in ~20–40 µs. Slower times (>100 µs) indicate scalar
+ *   fallback or library configuration issues.
+ *
+ *   Expected behavior:
+ *     • SIMD working: < 40 µs total (0.04 µs per call)
+ *     • Scalar fallback: > 100 µs total (0.1 µs per call)
+ *     • Prints diagnostic output to Serial for verification at startup
+ *
+ * Peak Detection:
+ *   findPeakAbs() scans a buffer for the maximum absolute value, useful for:
+ *     • Monitoring clipping (is peak near INT32_MAX?)
+ *     • Detecting signal presence (is peak above noise floor?)
+ *     • Validating overflow conditions in test vectors
+ *
+ *   Stateless operation suitable for any context (interrupt-safe, no allocation).
+ *
+ * Performance:
+ *   • verifySIMD(): ~20–40 µs with SIMD, ~100–200 µs without (ESP32-S3)
+ *   • findPeakAbs(): O(n) linear scan, ~1 ns per sample on ESP32-S3
+ *
+ * Integration:
+ *   Called early in system initialization (SystemContext::begin()) before audio
+ *   processing starts. If SIMD verification fails, system continues but may see
+ *   reduced real-time performance in DSP modules.
+ *
+ * =====================================================================================
+ */
+
 #include "Diagnostics.h"
 
 #include <Arduino.h>

@@ -1,33 +1,27 @@
+---
+# .clang-format - Code Style Configuration for ESP32 FM RDS Stereo Encoder
+Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
-TabWidth: 4
 UseTab: Never
+TabWidth: 4
 ColumnLimit: 100
-BreakBeforeBraces: Allman
-AllowShortIfStatementsOnASingleLine: false
+PointerAlignment: Right
 AllowShortFunctionsOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
-PointerAlignment: Left
+BreakBeforeBraces: Allman
+SpaceAfterCStyleCast: false
 SpaceBeforeParens: ControlStatements
+SpaceInEmptyBlock: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-SpaceInEmptyParentheses: false
-SpaceAfterCStyleCast: false
-SpaceAfterTemplateKeyword: false
-SpaceBeforeAssignmentOperators: true
-NamespaceIndentation: All
-AlignConsecutiveAssignments: true
-AlignConsecutiveDeclarations: true
-BraceWrapping:
-  AfterClass: true
-  AfterControlStatement: true
-  AfterEnum: true
-  AfterFunction: true
-  AfterNamespace: true
-  AfterStruct: true
-  AfterUnion: true
-  BeforeCatch: true
-  BeforeElse: true
-  SplitEmptyFunction: true
-  SplitEmptyRecord: true
-  SplitEmptyNamespace: true
+MaxEmptyLinesToKeep: 1
+ReflowComments: true
+AlignTrailingComments: true
+AlignOperands: Align
+FixNamespaceComments: true
+...

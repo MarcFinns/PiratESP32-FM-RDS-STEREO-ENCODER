@@ -1,7 +1,18 @@
 /*
  * =====================================================================================
  *
- *                              RDS Assembler (Core 1)
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                       RDS Assembler (ModuleBase Implementation)
+ *
+ * =====================================================================================
+ *
+ * File:         RDSAssembler.cpp
+ * Description:  RDS Bitstream Generator Module Implementation
+ *
+ * Purpose:
+ *   Generates the RDS bitstream (1187.5 bps) on a non-real-time core (Core 1).
+ *   The audio core (Core 0) reads bits via a non-blocking API and synthesizes the
+ *   57 kHz RDS injection synchronized to the 192 kHz sample clock.
  *
  * =====================================================================================
  */
@@ -10,405 +21,392 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-namespace RDSAssembler
+// ==================================================================================
+//                          SINGLETON INSTANCE
+// ==================================================================================
+
+RDSAssembler &RDSAssembler::getInstance()
 {
-// Single‑producer/single‑consumer FIFO of bits for the audio core.
-static QueueHandle_t g_bit_queue = nullptr;
-static TaskHandle_t g_task = nullptr;
-
-// ===================== RDS builder state =====================
-static uint16_t g_pi = 0x1234;     // Program Identification (default)
-static uint8_t  g_pty = 0;         // Program Type (0..31)
-static bool     g_tp  = false;     // Traffic Program
-static bool     g_ta  = false;     // Traffic Announcement
-static bool     g_ms  = true;      // Music (true) / Speech (false)
-
-static char     g_ps[8]  = { 'E','S','P','3','2',' ','F','M' };
-static char     g_rt[64] = { 'H','e','l','l','o',' ','R','D','S',' ','o','n',' ','E','S','P','3','2','!',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
-                              ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ' };
-static bool     g_rt_ab  = false;  // Text A/B flag (toggle to force RT refresh on receivers)
-
-// ============ AF (Alternative Frequencies) state (Method A) ============
-static uint8_t  g_af_codes[25];  // up to 25 AF codes
-static uint8_t  g_af_count = 0;  // number of valid AF codes
-static uint8_t  g_af_cursor = 0; // rotating index into AF codes
-
-// Clock‑Time (Group 4A) state
-static bool     g_ct_enabled = false;
-static uint16_t g_ct_mjd     = 0;   // Modified Julian Date (16‑bit, local date)
-static uint8_t  g_ct_hour    = 0;   // Local hour 0..23
-static uint8_t  g_ct_min     = 0;   // Local minute 0..59
-static bool     g_ct_lto_neg = false; // Local time offset sign (true = negative)
-static uint8_t  g_ct_lto_hh  = 0;     // Local time offset magnitude (0..31 half‑hours)
-
-// ============ CRC10 and offset words ============
-// CRC polynomial: x^10 + x^8 + x^7 + x^5 + x^4 + x^3 + 1 (0x5B9)
-static inline uint16_t crc10(uint16_t info)
-{
-    uint32_t reg = (uint32_t)info << 10; // append 10 zero bits
-    const uint32_t poly = 0x5B9u;        // 10-bit poly
-    for (int i = 25; i >= 10; --i)
-    {
-        if (reg & (1u << i))
-        {
-            reg ^= (poly << (i - 10));
-        }
-    }
-    return (uint16_t)(reg & 0x3FFu);
+    static RDSAssembler s_instance;
+    return s_instance;
 }
 
-// 10-bit offset words for blocks A, B, C, C' (version B), and D.
-// Values per EN 50067; used to XOR the CRC remainder to form the checkword.
-static constexpr uint16_t kOffsetA  = 0x0FC; // 252
-static constexpr uint16_t kOffsetB  = 0x198; // 408
-static constexpr uint16_t kOffsetC  = 0x168; // 360
-static constexpr uint16_t kOffsetD  = 0x1B4; // 436
-static constexpr uint16_t kOffsetCp = 0x1CC; // 460 (C' for version B)
+// ==================================================================================
+//                          CONSTRUCTOR & MEMBER INITIALIZATION
+// ==================================================================================
 
-// Serialize a 26-bit block (info, offset) MSB‑first into the bit FIFO.
-static inline void enqueueBlock(uint16_t info, uint16_t offset)
+RDSAssembler::RDSAssembler()
+    : bit_queue_(nullptr), bit_queue_len_(1024), core_id_(1), priority_(1), stack_words_(4096),
+      pi_(0x1234), pty_(0), tp_(false), ta_(false), ms_(true), rt_ab_(false), af_count_(0),
+      af_cursor_(0), ct_enabled_(false), ct_mjd_(0), ct_hour_(0), ct_min_(0), ct_lto_neg_(false),
+      ct_lto_hh_(0), bit_overflow_count_(0), bit_overflow_logged_(false)
 {
-    uint16_t cw = crc10(info) ^ (offset & 0x3FFu);
-    uint32_t block26 = ((uint32_t)info << 10) | cw;
-    for (int i = 25; i >= 0; --i)
-    {
-        uint8_t bit = (block26 >> i) & 1u;
-        if (g_bit_queue)
-        {
-            if (uxQueueSpacesAvailable(g_bit_queue) == 0 && uxQueueMessagesWaiting(g_bit_queue) >= 1)
-            {
-                uint8_t dummy;
-                xQueueReceive(g_bit_queue, &dummy, 0);
-            }
-            xQueueSend(g_bit_queue, &bit, 0);
-        }
-    }
+    // Initialize PS (Program Service name)
+    ps_[0] = 'E';
+    ps_[1] = 'S';
+    ps_[2] = 'P';
+    ps_[3] = '3';
+    ps_[4] = '2';
+    ps_[5] = ' ';
+    ps_[6] = 'F';
+    ps_[7] = 'M';
+
+    // Initialize RT (Radio Text)
+    const char default_rt[] = "Hello RDS on ESP32!                                              ";
+    for (int i = 0; i < 64; ++i)
+        rt_[i] = default_rt[i];
+
+    // Initialize AF codes
+    for (int i = 0; i < 25; ++i)
+        af_codes_[i] = 0;
 }
 
-// Map FM frequency (MHz) to AF code (1..204), 0 if out of range
-static inline uint8_t fm_freq_to_af_code(float mhz)
+// ==================================================================================
+//                          STATIC WRAPPER API
+// ==================================================================================
+
+bool RDSAssembler::startTask(int core_id, uint32_t priority, uint32_t stack_words,
+                             size_t bit_queue_len)
 {
-    // Round to nearest 0.1 MHz, then map 87.6..107.9 → codes 1..204
-    int tenths = (int)(mhz * 10.0f + 0.5f); // e.g., 101.1 → 1011
-    int n = tenths - 875;                   // 87.5 → 0; 87.6 → 1; ... 107.9 → 204
-    if (n < 1 || n > 204) return 0;
-    return (uint8_t)n;
+    RDSAssembler &rds = getInstance();
+    rds.bit_queue_len_ = bit_queue_len;
+    if (rds.bit_queue_len_ == 0)
+        rds.bit_queue_len_ = 1024;
+    rds.core_id_ = core_id;
+    rds.priority_ = priority;
+    rds.stack_words_ = stack_words;
+
+    // Spawn assembler task via ModuleBase helper
+    return rds.spawnTask("rds_asm",
+                         (uint32_t)stack_words,
+                         (UBaseType_t)priority,
+                         core_id,
+                         RDSAssembler::taskTrampoline);
 }
 
-// Build and enqueue one Group 2A (RadioText 64) for the given segment address (0..15).
-static void buildGroup2A(uint8_t seg)
+bool RDSAssembler::nextBit(uint8_t &bit)
 {
-    // Block A: PI
-    enqueueBlock(g_pi, kOffsetA);
-
-    // Block B: group code + flags + segment address
-    // Bits: 15..12 = 0b0010 (group 2), 11 = 0 (A), 10=TP, 9..5=PTY, 4=AB, 3..0=segment
-    uint16_t b = 0;
-    b |= (2u << 12);
-    // version A -> bit 11 = 0
-    b |= (g_tp ? 1u : 0u) << 10;
-    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
-    b |= (g_rt_ab ? 1u : 0u) << 4;
-    b |= (seg & 0x0Fu);
-    enqueueBlock(b, kOffsetB);
-
-    // Block C and D: 4 chars total, big‑endian pairs (char_hi<<8 | char_lo)
-    uint8_t i0 = seg * 4;
-    uint16_t c = ((uint16_t)(uint8_t)g_rt[i0 + 0] << 8) | (uint16_t)(uint8_t)g_rt[i0 + 1];
-    uint16_t d = ((uint16_t)(uint8_t)g_rt[i0 + 2] << 8) | (uint16_t)(uint8_t)g_rt[i0 + 3];
-    enqueueBlock(c, kOffsetC);
-    enqueueBlock(d, kOffsetD);
+    return getInstance().nextBitRaw(bit);
 }
 
-// Build and enqueue one Group 0A (PS + AF) for the given segment (0..3)
-static void buildGroup0A(uint8_t seg)
+void RDSAssembler::setPI(uint16_t pi)
 {
-    // Block A: PI
-    enqueueBlock(g_pi, kOffsetA);
-
-    // Block B: group 0A flags + DI bit + segment (lower 2 bits)
-    // Bits: 15..12 = 0b0000, 11=0 (A), 10=TP, 9..5=PTY, 4=TA, 3=MS, 2=DI, 1..0=seg
-    uint16_t b = 0;
-    b |= (g_tp ? 1u : 0u) << 10;
-    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
-    b |= (g_ta ? 1u : 0u) << 4;
-    b |= (g_ms ? 1u : 0u) << 3;
-    // DI bit (transmitted per segment). We use a benign fixed pattern (0) here.
-    b |= ((uint16_t)0u) << 2;
-    b |= (seg & 0x03u);
-    enqueueBlock(b, kOffsetB);
-
-    // Block C: AF pair (Method A)
-    uint8_t af1 = 0, af2 = 0;
-    if (g_af_count > 0)
-    {
-        if (g_af_cursor == 0)
-        {
-            af1 = (uint8_t)(224 + g_af_count); // length code
-            af2 = g_af_codes[0];
-            g_af_cursor = 1;
-        }
-        else
-        {
-            af1 = g_af_codes[g_af_cursor % g_af_count];
-            af2 = g_af_codes[(g_af_cursor + 1) % g_af_count];
-            g_af_cursor = (uint8_t)((g_af_cursor + 2) % g_af_count);
-        }
-    }
-    uint16_t c = ((uint16_t)af1 << 8) | af2;
-    enqueueBlock(c, kOffsetC);
-
-    // Block D: two PS characters (segment)
-    uint8_t i0 = seg * 2;
-    uint16_t d = ((uint16_t)(uint8_t)g_ps[i0 + 0] << 8) | (uint16_t)(uint8_t)g_ps[i0 + 1];
-    enqueueBlock(d, kOffsetD);
+    getInstance().pi_ = pi;
+}
+void RDSAssembler::setPTY(uint8_t pty)
+{
+    getInstance().pty_ = (uint8_t)(pty & 0x1Fu);
+}
+void RDSAssembler::setTP(bool tp)
+{
+    getInstance().tp_ = tp;
+}
+void RDSAssembler::setTA(bool ta)
+{
+    getInstance().ta_ = ta;
+}
+void RDSAssembler::setMS(bool music)
+{
+    getInstance().ms_ = music;
 }
 
-// Build and enqueue one Group 0B (Program Service name) for the given segment (0..3)
-// Version B is used to avoid AF handling; PS chars are carried in block D.
-static void buildGroup0B(uint8_t seg)
+void RDSAssembler::setPS(const char *ps)
 {
-    // Block A: PI
-    enqueueBlock(g_pi, kOffsetA);
-
-    // Block B: group 0B flags + DI bit + segment (lower 2 bits)
-    // Bits: 15..12 = 0b0000, 11=1 (B), 10=TP, 9..5=PTY, 4=TA, 3=MS, 2=DI, 1..0=seg
-    uint16_t b = 0;
-    // group 0 -> top 4 bits are 0
-    b |= 1u << 11; // Version B
-    b |= (g_tp ? 1u : 0u) << 10;
-    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
-    b |= (g_ta ? 1u : 0u) << 4;
-    b |= (g_ms ? 1u : 0u) << 3;
-    // DI: place a bit that can be tied to segment (simple: DI=seg==0)
-    b |= ((seg == 0) ? 1u : 0u) << 2;
-    b |= (seg & 0x03u);
-    enqueueBlock(b, kOffsetB);
-
-    // Block C′: no AF, place filler (e.g., spaces 0x2020 or zero)
-    // Use kOffsetCp for version B
-    uint16_t cprime = 0x2020u; // two spaces
-    enqueueBlock(cprime, kOffsetCp);
-
-    // Block D: two PS characters
-    uint8_t i0 = seg * 2;
-    uint16_t d = ((uint16_t)(uint8_t)g_ps[i0 + 0] << 8) | (uint16_t)(uint8_t)g_ps[i0 + 1];
-    enqueueBlock(d, kOffsetD);
-}
-
-// Build and enqueue one Group 4A (Clock‑Time and Date)
-// Practical mapping used here:
-//  - Block B: group 4A header with TP/PTY and local time offset sign (bit 4)
-//  - Block C: 16‑bit MJD (local date)
-//  - Block D: hour (5 bits), minute (6 bits), local time offset magnitude (5 bits)
-static void buildGroup4A()
-{
-    // Block A: PI
-    enqueueBlock(g_pi, kOffsetA);
-
-    // Block B: group 4A header with TP/PTY; use bit4 for LTO sign (1=negative)
-    uint16_t b = 0;
-    b |= (4u << 12);               // Group 4
-    // version A -> bit 11 = 0
-    b |= (g_tp ? 1u : 0u) << 10;
-    b |= ((uint16_t)(g_pty & 0x1Fu)) << 5;
-    b |= (g_ct_lto_neg ? 1u : 0u) << 4; // local time offset sign
-    enqueueBlock(b, kOffsetB);
-
-    // Block C: 16‑bit MJD (local date)
-    enqueueBlock(g_ct_mjd, kOffsetC);
-
-    // Block D: hour (5), minute (6), offset magnitude (5)
-    uint16_t d = 0;
-    d |= ((uint16_t)(g_ct_hour & 0x1Fu)) << 11;  // bits 15..11
-    d |= ((uint16_t)(g_ct_min  & 0x3Fu)) << 5;   // bits 10..5
-    d |= ((uint16_t)(g_ct_lto_hh & 0x1Fu));      // bits 4..0
-    enqueueBlock(d, kOffsetD);
-}
-
-bool nextBit(uint8_t &bit)
-{
-    if (!g_bit_queue)
-    {
-        return false;
-    }
-    return xQueueReceive(g_bit_queue, &bit, 0) == pdTRUE;
-}
-
-// Simple PRBS generator placeholder: produces pseudo‑random bits at ~1187.5 bps.
-// Replace with a proper RDS group scheduler + CRC/checkwords later.
-static void assembler_task(void *arg)
-{
-    (void)arg;
-
-    // Simple time‑paced serializer at ~1187.5 bps
-    const TickType_t tick_1ms = pdMS_TO_TICKS(1);
-    uint32_t accu_us = 0;
-    const uint32_t bit_us = 842; // approximate
-
-    // Group rotation indices
-    uint8_t seg_ps = 0;      // 0..3
-    uint8_t seg_rt = 0;      // 0..15
-    uint8_t rot    = 0;      // cadence: 0,1 -> PS; 2 -> RT
-
-    // Bit buffer for current 26‑bit block serialization
-    // We build whole groups on demand by calling buildGroupXX, which enqueues bits directly.
-
-    // Default CT: October 26, 1985 00:00 (local), UTC offset 0
-    if (!g_ct_enabled)
-    {
-        setClock(1985, 10, 26, 0, 0, 0);
-    }
-
-    for (;;)
-    {
-        vTaskDelay(tick_1ms);
-        accu_us += 1000;
-
-        while (accu_us >= bit_us)
-        {
-            accu_us -= bit_us;
-
-            // If queue has room to absorb full group bursts, we can push a group when low level
-            // For simplicity, push one bit per pacing; but if the queue gets low, prefill by emitting a group.
-            if (uxQueueMessagesWaiting(g_bit_queue) < 26)
-            {
-                // Cadence: PS, PS, RT (repeat). Always use Group 0A (not 0B) for compatibility
-                // with older receivers (e.g., Denon DRA-365RD) which may not properly
-                // decode Group 0B. Group 0A with or without AF list is more widely supported.
-                if (rot == 2)
-                {
-                    buildGroup2A(seg_rt);
-                    seg_rt = (uint8_t)((seg_rt + 1) & 0x0F);
-                }
-                else
-                {
-                    buildGroup0A(seg_ps);  // Always use 0A, not 0B
-                    seg_ps = (uint8_t)((seg_ps + 1) & 0x03);
-                }
-                rot = (uint8_t)((rot + 1) % 3);
-            }
-
-            // Emit one bit from the queue at this pacing tick (acts as a drain limiter)
-            // If the queue is empty, synth will read idle (false) via nextBit()
-            // No need to dequeue here; the consumer dequeues bits. We just keep filling.
-            // (We could also do nothing here since we already pace group emission via level check.)
-        }
-    }
-}
-
-bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words, std::size_t bit_queue_len)
-{
-    if (g_task)
-    {
-        return true;
-    }
-    if (bit_queue_len == 0)
-    {
-        bit_queue_len = 1024;
-    }
-    g_bit_queue = xQueueCreate((UBaseType_t)bit_queue_len, sizeof(uint8_t));
-    if (!g_bit_queue)
-    {
-        return false;
-    }
-
-    BaseType_t ok = xTaskCreatePinnedToCore(
-        assembler_task,
-        "rds_asm",
-        stack_words,
-        nullptr,
-        priority,
-        &g_task,
-        core_id);
-
-    return ok == pdPASS;
-}
-
-void setPS(const char *ps)
-{
-    if (!ps) return;
-    // Copy exactly 8 chars, pad with spaces
+    RDSAssembler &rds = getInstance();
+    if (!ps)
+        return;
     for (int i = 0; i < 8; ++i)
     {
         char c = ps[i];
-        if (c == '\0') c = ' ';
-        g_ps[i] = c;
+        if (c == '\0')
+            c = ' ';
+        rds.ps_[i] = c;
     }
 }
 
-void setRT(const char *rt)
+void RDSAssembler::setRT(const char *rt)
 {
-    if (!rt) return;
-    // Copy up to 64 chars, pad with spaces
+    RDSAssembler &rds = getInstance();
+    if (!rt)
+        return;
     int i = 0;
     for (; i < 64 && rt[i] != '\0'; ++i)
-    {
-        g_rt[i] = rt[i];
-    }
+        rds.rt_[i] = rt[i];
     for (; i < 64; ++i)
-    {
-        g_rt[i] = ' ';
-    }
-    // Toggle A/B flag to force RT refresh on receivers
-    g_rt_ab = !g_rt_ab;
+        rds.rt_[i] = ' ';
+    rds.rt_ab_ = !rds.rt_ab_;
 }
 
-void setAF_FM(const float *freqs_mhz, std::size_t count)
+void RDSAssembler::setAF_FM(const float *freqs_mhz, size_t count)
 {
-    g_af_count = 0;
-    g_af_cursor = 0;
-    if (!freqs_mhz || count == 0) return;
-    // Deduplicate and map to AF codes
-    for (std::size_t i = 0; i < count && g_af_count < 25; ++i)
+    RDSAssembler &rds = getInstance();
+    rds.af_count_ = 0;
+    rds.af_cursor_ = 0;
+    if (!freqs_mhz || count == 0)
+        return;
+
+    for (size_t i = 0; i < count && rds.af_count_ < 25; ++i)
     {
-        uint8_t code = fm_freq_to_af_code(freqs_mhz[i]);
-        if (code == 0) continue;
+        // Map frequency to AF code (1-204)
+        int tenths = (int)(freqs_mhz[i] * 10.0f + 0.5f);
+        int n = tenths - 875;
+        if (n < 1 || n > 204)
+            continue;
+
+        uint8_t code = (uint8_t)n;
         bool exists = false;
-        for (uint8_t k = 0; k < g_af_count; ++k)
+        for (uint8_t k = 0; k < rds.af_count_; ++k)
         {
-            if (g_af_codes[k] == code) { exists = true; break; }
+            if (rds.af_codes_[k] == code)
+            {
+                exists = true;
+                break;
+            }
         }
         if (!exists)
-        {
-            g_af_codes[g_af_count++] = code;
-        }
+            rds.af_codes_[rds.af_count_++] = code;
     }
 }
 
-// Compute Modified Julian Date (MJD) from Gregorian Y/M/D
-static uint16_t ymd_to_mjd16(int year, int month, int day)
+void RDSAssembler::setClock(int year, int month, int day, int hour, int minute,
+                            int8_t offset_half_hours)
 {
-    // Fliegel-Van Flandern algorithm
+    RDSAssembler &rds = getInstance();
+    if (hour < 0)
+        hour = 0;
+    if (hour > 23)
+        hour = 23;
+    if (minute < 0)
+        minute = 0;
+    if (minute > 59)
+        minute = 59;
+
+    rds.ct_hour_ = (uint8_t)hour;
+    rds.ct_min_ = (uint8_t)minute;
+    rds.ct_lto_neg_ = (offset_half_hours < 0);
+    int off = offset_half_hours < 0 ? -offset_half_hours : offset_half_hours;
+    if (off > 31)
+        off = 31;
+    rds.ct_lto_hh_ = (uint8_t)off;
+
+    // Compute MJD from date (Fliegel-Van Flandern algorithm)
     int a = (14 - month) / 12;
     int y = year + 4800 - a;
     int m = month + 12 * a - 3;
     long jdn = day + (153 * m + 2) / 5 + 365L * y + y / 4 - y / 100 + y / 400 - 32045;
-    long mjd = jdn - 2400001; // JDN 2400001 corresponds to MJD 0 (approx)
-    if (mjd < 0) mjd = 0;
-    if (mjd > 65535) mjd = 65535;
-    return (uint16_t)mjd;
+    long mjd = jdn - 2400001;
+    if (mjd < 0)
+        mjd = 0;
+    if (mjd > 65535)
+        mjd = 65535;
+    rds.ct_mjd_ = (uint16_t)mjd;
+    rds.ct_enabled_ = true;
 }
 
-void setClock(int year, int month, int day, int hour, int minute, int8_t offset_half_hours)
+// ==================================================================================
+//                          MODULEBASE IMPLEMENTATION
+// ==================================================================================
+
+void RDSAssembler::taskTrampoline(void *arg)
 {
-    if (hour < 0) hour = 0; if (hour > 23) hour = 23;
-    if (minute < 0) minute = 0; if (minute > 59) minute = 59;
-    // Store local time and offset sign/magnitude
-    g_ct_hour = (uint8_t)hour;
-    g_ct_min  = (uint8_t)minute;
-    g_ct_lto_neg = (offset_half_hours < 0);
-    int off = offset_half_hours < 0 ? -offset_half_hours : offset_half_hours;
-    if (off > 31) off = 31;
-    g_ct_lto_hh = (uint8_t)off;
-    // Compute MJD from local date
-    g_ct_mjd = ymd_to_mjd16(year, month, day);
-    g_ct_enabled = true;
+    ModuleBase::defaultTaskTrampoline(arg);
 }
 
-void setPI(uint16_t pi) { g_pi = pi; }
-void setPTY(uint8_t pty) { g_pty = (uint8_t)(pty & 0x1Fu); }
-void setTP(bool tp) { g_tp = tp; }
-void setTA(bool ta) { g_ta = ta; }
-void setMS(bool music) { g_ms = music; }
-} // namespace RDSAssembler
+bool RDSAssembler::begin()
+{
+    // Create FreeRTOS queue for RDS bits
+    bit_queue_ = xQueueCreate((UBaseType_t)bit_queue_len_, sizeof(uint8_t));
+    if (!bit_queue_)
+    {
+        ErrorHandler::logError(ErrorCode::INIT_QUEUE_FAILED, "RDSAssembler::begin",
+                               "bit queue creation failed");
+        return false;
+    }
+
+    // Initialize default CT if not already set
+    if (!ct_enabled_)
+        setClock(1985, 10, 26, 0, 0, 0);
+
+    ErrorHandler::logInfo("RDSAssembler", "Task initialized successfully");
+    return true;
+}
+
+void RDSAssembler::process()
+{
+    // ==================================================================================
+    //                      RDS HELPER FUNCTIONS
+    // ==================================================================================
+
+    auto crc10 = [](uint16_t info) -> uint16_t
+    {
+        uint32_t reg = (uint32_t)info << 10;
+        const uint32_t poly = 0x5B9u;
+        for (int i = 25; i >= 10; --i)
+        {
+            if (reg & (1u << i))
+                reg ^= (poly << (i - 10));
+        }
+        return (uint16_t)(reg & 0x3FFu);
+    };
+
+    constexpr uint16_t kOffsetA = 0x0FC;
+    constexpr uint16_t kOffsetB = 0x198;
+    constexpr uint16_t kOffsetC = 0x168;
+    constexpr uint16_t kOffsetD = 0x1B4;
+    constexpr uint16_t kOffsetCp = 0x1CC;
+
+    auto enqueueBlock = [&](uint16_t info, uint16_t offset)
+    {
+        uint16_t cw = crc10(info) ^ (offset & 0x3FFu);
+        uint32_t block26 = ((uint32_t)info << 10) | cw;
+        for (int i = 25; i >= 0; --i)
+        {
+            uint8_t bit = (block26 >> i) & 1u;
+            if (bit_queue_)
+            {
+                if (uxQueueSpacesAvailable(bit_queue_) == 0 &&
+                    uxQueueMessagesWaiting(bit_queue_) >= 1)
+                {
+                    uint8_t dummy;
+                    xQueueReceive(bit_queue_, &dummy, 0);
+                }
+                xQueueSend(bit_queue_, &bit, 0);
+            }
+        }
+    };
+
+    // ==================================================================================
+    //                      GROUP BUILDING FUNCTIONS
+    // ==================================================================================
+
+    auto buildGroup2A = [&](uint8_t seg)
+    {
+        enqueueBlock(pi_, kOffsetA);
+
+        uint16_t b = 0;
+        b |= (2u << 12);
+        b |= (tp_ ? 1u : 0u) << 10;
+        b |= ((uint16_t)(pty_ & 0x1Fu)) << 5;
+        b |= (rt_ab_ ? 1u : 0u) << 4;
+        b |= (seg & 0x0Fu);
+        enqueueBlock(b, kOffsetB);
+
+        uint8_t i0 = seg * 4;
+        uint16_t c = ((uint16_t)(uint8_t)rt_[i0 + 0] << 8) | (uint16_t)(uint8_t)rt_[i0 + 1];
+        uint16_t d = ((uint16_t)(uint8_t)rt_[i0 + 2] << 8) | (uint16_t)(uint8_t)rt_[i0 + 3];
+        enqueueBlock(c, kOffsetC);
+        enqueueBlock(d, kOffsetD);
+    };
+
+    auto buildGroup0A = [&](uint8_t seg)
+    {
+        enqueueBlock(pi_, kOffsetA);
+
+        uint16_t b = 0;
+        b |= (tp_ ? 1u : 0u) << 10;
+        b |= ((uint16_t)(pty_ & 0x1Fu)) << 5;
+        b |= (ta_ ? 1u : 0u) << 4;
+        b |= (ms_ ? 1u : 0u) << 3;
+        b |= ((uint16_t)0u) << 2;
+        b |= (seg & 0x03u);
+        enqueueBlock(b, kOffsetB);
+
+        uint8_t af1 = 0, af2 = 0;
+        if (af_count_ > 0)
+        {
+            if (af_cursor_ == 0)
+            {
+                af1 = (uint8_t)(224 + af_count_);
+                af2 = af_codes_[0];
+                af_cursor_ = 1;
+            }
+            else
+            {
+                af1 = af_codes_[af_cursor_ % af_count_];
+                af2 = af_codes_[(af_cursor_ + 1) % af_count_];
+                af_cursor_ = (uint8_t)((af_cursor_ + 2) % af_count_);
+            }
+        }
+        uint16_t c = ((uint16_t)af1 << 8) | af2;
+        enqueueBlock(c, kOffsetC);
+
+        uint8_t i0 = seg * 2;
+        uint16_t d = ((uint16_t)(uint8_t)ps_[i0 + 0] << 8) | (uint16_t)(uint8_t)ps_[i0 + 1];
+        enqueueBlock(d, kOffsetD);
+    };
+
+    // ==================================================================================
+    //                      MAIN PROCESSING LOOP
+    // ==================================================================================
+
+    static uint32_t accu_us = 0;
+    static uint8_t seg_ps = 0;
+    static uint8_t seg_rt = 0;
+    static uint8_t rot = 0;
+    static bool first_time = true;
+
+    if (first_time)
+    {
+        first_time = false;
+        accu_us = 0;
+    }
+
+    const uint32_t bit_us = 842;
+    vTaskDelay(pdMS_TO_TICKS(1));
+    accu_us += 1000;
+
+    while (accu_us >= bit_us)
+    {
+        accu_us -= bit_us;
+
+        if (uxQueueMessagesWaiting(bit_queue_) < 26)
+        {
+            if (rot == 2)
+            {
+                buildGroup2A(seg_rt);
+                seg_rt = (uint8_t)((seg_rt + 1) & 0x0F);
+            }
+            else
+            {
+                buildGroup0A(seg_ps);
+                seg_ps = (uint8_t)((seg_ps + 1) & 0x03);
+            }
+            rot = (uint8_t)((rot + 1) % 3);
+        }
+    }
+}
+
+void RDSAssembler::shutdown()
+{
+    if (bit_queue_)
+    {
+        vQueueDelete(bit_queue_);
+        bit_queue_ = nullptr;
+    }
+}
+
+// ==================================================================================
+//                          INSTANCE MESSAGE METHODS
+// ==================================================================================
+
+bool RDSAssembler::nextBitRaw(uint8_t &bit)
+{
+    if (!bit_queue_)
+    {
+        ErrorHandler::logError(ErrorCode::QUEUE_NOT_INITIALIZED, "RDSAssembler::nextBitRaw",
+                               "bit queue is null");
+        return false;
+    }
+
+    if (xQueueReceive(bit_queue_, &bit, 0) != pdTRUE)
+    {
+        // Queue empty - this is normal, not necessarily an error
+        return false;
+    }
+
+    return true;
+}
+
+// =====================================================================================
+//                                END OF FILE
+// =====================================================================================

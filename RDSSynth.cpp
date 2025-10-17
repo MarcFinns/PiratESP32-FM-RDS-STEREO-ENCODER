@@ -1,10 +1,60 @@
 /*
  * =====================================================================================
  *
- *                              RDS Synthesizer (Core 0)
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                     RDS 57 kHz Subcarrier Synthesizer Implementation
+ *
+ * =====================================================================================
+ *
+ * File:         RDSSynth.cpp
+ * Description:  Real-time RDS baseband and modulation kernel at 192 kHz
+ *
+ * Purpose:
+ *   This implementation provides the core RDS signal generation pipeline. It performs
+ *   bit-to-symbol Manchester encoding, timing control, baseband filtering, and
+ *   up-conversion to 57 kHz in a single real-time block at 192 kHz sample rate.
+ *
+ * Signal Flow:
+ *   1. RDS bit fetching (non-blocking from RDSAssembler queue)
+ *   2. Differential Manchester encoding (bi-phase mark with state)
+ *   3. Symbol timing via phase accumulator (1187.5 bps = 19 kHz ÷ 16)
+ *   4. Baseband shaping via cascaded IIR biquads (~2.4 kHz cutoff)
+ *   5. DSB-SC modulation (×57 kHz coherent carrier)
+ *   6. Amplitude scaling and output
+ *
+ * Manchester Encoding (Bi-Phase Mark):
+ *   Each RDS bit is represented as 1 Manchester symbol (2 transitions):
+ *     • Bit=0: +1 in first half, −1 in second half
+ *     • Bit=1: −1 in first half, +1 in second half
+ *   Differential encoding XORs incoming bits with state to add robustness.
+ *
+ * Symbol Timing:
+ *   Uses normalized phase accumulator [0,1):
+ *     sym_phase[n+1] = sym_phase[n] + sym_inc_
+ *     sym_inc_ = RDS_SYMBOL_RATE / sample_rate = 1187.5 ÷ 192000
+ *   At half (0.5) and full (1.0) phase, symbol transitions occur.
+ *
+ * Baseband Filtering (Biquad Cascade):
+ *   Two cascaded second-order IIR lowpass filters targeting ~2.4 kHz:
+ *     • Order 4 (2 poles/pair)
+ *     • Butterworth-like response (Q ≈ 0.707)
+ *     • Prevents RF splatter and aliasing into pilot/subcarrier bands
+ *
+ * Thread Safety:
+ *   Not thread-safe. processBlockWithCarrier() must be called exclusively from
+ *   Core 0 audio pipeline. configure() and reset() must not be called during
+ *   processing. RDSAssembler::nextBit() is accessed via non-blocking API.
+ *
+ * Performance:
+ *   Per-block cost (512 samples @ 192 kHz):
+ *     • Manchester + differential: 512 ops (negligible)
+ *     • Biquad filtering: 2 × 512 × 4 = 4096 FLOPS (SIMD accelerated)
+ *     • Modulation: 512 multiplications
+ *     • Total: ~2–3 ms per block on ESP32-S3
  *
  * =====================================================================================
  */
+
 #include "RDSSynth.h"
 
 #include "Config.h"

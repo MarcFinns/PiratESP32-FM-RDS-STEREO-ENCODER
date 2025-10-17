@@ -1,3 +1,61 @@
+/*
+ * =====================================================================================
+ *
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      FreeRTOS Task Performance Statistics Implementation
+ *
+ * =====================================================================================
+ *
+ * File:         TaskStats.cpp
+ * Description:  Runtime task profiling and core utilization monitoring
+ *
+ * Purpose:
+ *   This implementation provides non-blocking access to FreeRTOS runtime statistics
+ *   for monitoring real-time task performance on dual-core ESP32. It tracks CPU
+ *   utilization per core and per task, stack watermarks, and task state without
+ *   halting audio processing or requiring synchronized access.
+ *
+ * FreeRTOS Runtime Stats:
+ *   FreeRTOS maintains a timer counter that increments at a fixed rate (usually 1 µs).
+ *   Each task's ulRunTimeCounter is updated when the task runs. By sampling deltas
+ *   between invocations, we compute per-core and per-task CPU percentages.
+ *
+ * Per-Core Load Calculation:
+ *   Uses task idle counters (IDLE0 on Core 0, IDLE1 on Core 1):
+ *     Core_Load% = (1.0 − idle_time_delta / core_total_time_delta) × 100
+ *
+ *   This accounts for actual work vs. idle on each core independently.
+ *
+ * Per-Task Profiling:
+ *   Tracks CPU% and stack watermarks for:
+ *     • audio: Core 0 DSP pipeline (expected 80–95%)
+ *     • logger: Core 1 error logging task (expected 5–15%)
+ *     • vu: Core 1 VU meter display task (expected 2–8%)
+ *
+ *   Stack watermarks are per-task free stack (in 32-bit words) reported by FreeRTOS.
+ *
+ * State Management:
+ *   Static variables track last-known values for delta calculation:
+ *     • s_last_total_runtime: Total system runtime counter
+ *     • s_last_idle[0,1]_runtime: Per-core idle task counters
+ *     • s_last_[audio,logger,vu]_runtime: Per-task counters
+ *     • s_last_core[0,1]_total: Per-core total runtime (for per-core load)
+ *
+ * Conditional Compilation:
+ *   If configGENERATE_RUN_TIME_STATS is 0 (disabled), collect() returns false
+ *   and outputs remain unchanged (zero-cost fallback).
+ *
+ * Thread Safety:
+ *   Read-only for statistics (thread-safe via FreeRTOS API). State updates are
+ *   idempotent and non-blocking. Suitable for any task context.
+ *
+ * Performance:
+ *   collect() executes in ~10–20 µs (64 task scan with caching). No blocking
+ *   or interrupt-safe operations required.
+ *
+ * =====================================================================================
+ */
+
 #include "TaskStats.h"
 
 #include <cstring>

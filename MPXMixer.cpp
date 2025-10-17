@@ -1,10 +1,48 @@
-/**
- * MPXMixer implementation (Allman brace style)
+/*
+ * =====================================================================================
  *
- * Generates pilot and subcarrier via the provided NCOs, then builds the MPX
- * with a single fused accumulation pass to minimize memory traffic:
- *   mpx = mono + (pilot_amp * pilot) + (diff_amp * diff * subcarrier)
+ *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                       FM Stereo Multiplex Signal Mixer Implementation
+ *
+ * =====================================================================================
+ *
+ * File:         MPXMixer.cpp
+ * Description:  Real-time FM multiplex baseband signal construction
+ *
+ * Purpose:
+ *   This implementation module provides the signal mixing kernel for constructing
+ *   the complete FM stereo multiplex signal at 192 kHz. It combines mono (L+R),
+ *   pilot tone (19 kHz), and stereo subcarrier (L-R modulated on 38 kHz) with
+ *   configurable scaling factors.
+ *
+ * Algorithm:
+ *   Fused accumulation in single pass over memory minimizes cache misses:
+ *     MPX[i] = mono[i]
+ *              + PILOT_AMP × pilot_buffer[i]
+ *              + DIFF_AMP × diff[i] × subcarrier_buffer[i]
+ *
+ *   This approach ensures:
+ *     • Deterministic latency (no intermediate buffers)
+ *     • Minimal memory bandwidth (one write, multiple reads)
+ *     • Compiler-friendly for vectorization
+ *
+ * Configuration:
+ *   Pilot and subcarrier amplitudes are user-configurable to accommodate different
+ *   stereo receiver standards and RF power constraints. Typical values:
+ *     • pilot_amp = 0.1 (10% for ARI/RDS compatibility)
+ *     • diff_amp = 0.5 (50% of mono reference for DSB-SC modulation)
+ *
+ * Thread Safety:
+ *   Not thread-safe. Process state (amplitudes) is immutable once constructed.
+ *   process() must be called exclusively from Core 0 audio task.
+ *
+ * Feature Gating:
+ *   Audio output, pilot, and subcarrier can be individually enabled/disabled via
+ *   Config namespace flags for diagnostic and testing purposes.
+ *
+ * =====================================================================================
  */
+
 #include "MPXMixer.h"
 
 MPXMixer::MPXMixer(float pilot_amp, float diff_amp)

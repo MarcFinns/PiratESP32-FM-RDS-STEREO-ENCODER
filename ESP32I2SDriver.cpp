@@ -1,7 +1,7 @@
 /*
  * =====================================================================================
  *
- *                            ESP32 RDS STEREO ENCODER
+ *                      PiratESP32 - FM RDS STEREO ENCODER
  *                         ESP32 Hardware Driver Implementation
  *
  * =====================================================================================
@@ -16,7 +16,7 @@
  */
 
 #include "ESP32I2SDriver.h"
-#include "I2SDriver.h"  // AudioIO namespace (existing I2S setup code)
+#include "I2SDriver.h" // AudioIO namespace (existing I2S setup code)
 #include "Log.h"
 
 #include <Arduino.h>
@@ -27,8 +27,7 @@
 //                          CONSTRUCTOR / DESTRUCTOR
 // ==================================================================================
 
-ESP32I2SDriver::ESP32I2SDriver()
-    : is_initialized_(false), last_error_(0)
+ESP32I2SDriver::ESP32I2SDriver() : is_initialized_(false), last_error_(0)
 {
     // State initialized to not-ready
 }
@@ -49,14 +48,14 @@ bool ESP32I2SDriver::initialize()
 {
     if (is_initialized_)
     {
-        Log::enqueue(Log::WARN, "ESP32I2SDriver already initialized");
+        Log::enqueue(LogLevel::WARN, "ESP32I2SDriver already initialized");
         return true;
     }
 
     // Initialize TX first (establishes MCLK)
     if (!initializeTx())
     {
-        Log::enqueue(Log::ERROR, "ESP32I2SDriver: TX initialization failed");
+        Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: TX initialization failed");
         is_initialized_ = false;
         return false;
     }
@@ -67,15 +66,15 @@ bool ESP32I2SDriver::initialize()
     // Initialize RX (uses MCLK from TX)
     if (!initializeRx())
     {
-        Log::enqueue(Log::ERROR, "ESP32I2SDriver: RX initialization failed");
+        Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: RX initialization failed");
         shutdownTx();
         is_initialized_ = false;
         return false;
     }
 
     is_initialized_ = true;
-    last_error_    = 0;
-    Log::enqueue(Log::INFO, "ESP32I2SDriver initialized successfully");
+    last_error_ = 0;
+    Log::enqueue(LogLevel::INFO, "ESP32I2SDriver initialized successfully");
     return true;
 }
 
@@ -90,23 +89,23 @@ void ESP32I2SDriver::shutdown()
     shutdownTx();
 
     is_initialized_ = false;
-    Log::enqueue(Log::INFO, "ESP32I2SDriver shut down");
+    Log::enqueue(LogLevel::INFO, "ESP32I2SDriver shut down");
 }
 
-bool ESP32I2SDriver::read(int32_t* buffer, std::size_t buffer_bytes, std::size_t& bytes_read,
+bool ESP32I2SDriver::read(int32_t *buffer, std::size_t buffer_bytes, std::size_t &bytes_read,
                           uint32_t timeout_ms)
 {
     if (!is_initialized_)
     {
         last_error_ = ESP_ERR_INVALID_STATE;
-        bytes_read  = 0;
+        bytes_read = 0;
         return false;
     }
 
     if (!buffer || buffer_bytes == 0)
     {
         last_error_ = ESP_ERR_INVALID_ARG;
-        bytes_read  = 0;
+        bytes_read = 0;
         return false;
     }
 
@@ -123,19 +122,19 @@ bool ESP32I2SDriver::read(int32_t* buffer, std::size_t buffer_bytes, std::size_t
     return true;
 }
 
-bool ESP32I2SDriver::write(const int32_t* buffer, std::size_t buffer_bytes,
-                           std::size_t& bytes_written, uint32_t timeout_ms)
+bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
+                           std::size_t &bytes_written, uint32_t timeout_ms)
 {
     if (!is_initialized_)
     {
-        last_error_  = ESP_ERR_INVALID_STATE;
+        last_error_ = ESP_ERR_INVALID_STATE;
         bytes_written = 0;
         return false;
     }
 
     if (!buffer || buffer_bytes == 0)
     {
-        last_error_   = ESP_ERR_INVALID_ARG;
+        last_error_ = ESP_ERR_INVALID_ARG;
         bytes_written = 0;
         return false;
     }
@@ -143,7 +142,7 @@ bool ESP32I2SDriver::write(const int32_t* buffer, std::size_t buffer_bytes,
     // Perform blocking write to I2S TX
     // Note: i2s_write expects non-const pointer, so we cast away const here
     // The I2S driver does not modify the buffer
-    esp_err_t ret = i2s_write(kI2SPortTx, const_cast<int32_t*>(buffer), buffer_bytes,
+    esp_err_t ret = i2s_write(kI2SPortTx, const_cast<int32_t *>(buffer), buffer_bytes,
                               &bytes_written, timeout_ms);
 
     if (ret != ESP_OK)
