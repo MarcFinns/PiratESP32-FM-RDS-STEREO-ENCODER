@@ -64,21 +64,23 @@ static void rds_demo_task(void* arg)
     RDSAssembler::setTP(true);       // Traffic Program
     RDSAssembler::setTA(false);      // No current Traffic Announcement
     RDSAssembler::setMS(true);       // Music
-    RDSAssembler::setPS("PIRATE32"); // 8 chars, padded with space
+    RDSAssembler::setPS("PiratESP"); // 8 chars, padded with space
 
     // A few rotating RadioText messages (64 chars max; padded internally)
     static const char* kRT[] = {"Hello from ESP32 FM Stereo RDS encoder!",
-                                "This is a demo RadioText. Enjoy the music!",
-                                "RDS running sample-synchronous at 57 kHz."};
-    const int          n     = sizeof(kRT) / sizeof(kRT[0]);
-    int                idx   = 0;
+                                "Fully digital signal processing pipeline",
+                                "This is a demo RadioText. Enjoy the music!"};
+
+    const int n   = sizeof(kRT) / sizeof(kRT[0]);
+    int       idx = 0;
+
     // Initial RT
     RDSAssembler::setRT(kRT[idx]);
     idx = (idx + 1) % n;
 
     for (;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(10000)); // update every 10 seconds
+        vTaskDelay(pdMS_TO_TICKS(30000)); // update every 30 seconds
         RDSAssembler::setRT(kRT[idx]);    // setRT toggles A/B flag internally
         idx = (idx + 1) % n;
     }
@@ -131,7 +133,7 @@ void setup()
 
     // ---- Start RDS Assembler Task (Core 1) ----
     // Non-real-time task to build RDS bitstream; audio core will synthesize
-    if (Config::ENABLE_RDS)
+    if (Config::ENABLE_RDS_57K)
     {
         RDSAssembler::startTask(1,    // core_id: Core 1
                                 1,    // priority: Low

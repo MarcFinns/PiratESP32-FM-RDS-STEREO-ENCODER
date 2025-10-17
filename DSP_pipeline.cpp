@@ -151,7 +151,7 @@ bool DSP_pipeline::begin()
 
     // Configure RDS synthesizer if RDS transmission is enabled
     // RDS assembler task must be started separately in setup()
-    if (Config::ENABLE_RDS)
+    if (Config::ENABLE_RDS_57K)
     {
         rds_synth_.configure(static_cast<float>(Config::SAMPLE_RATE_DAC));
     }
@@ -447,30 +447,22 @@ void DSP_pipeline::process()
     }
 
     // ============================================================================
-    // STAGE 2: FM Pre-Emphasis Filter
+    // STAGE 2: FM Pre-Emphasis Filter (optional)
     // ============================================================================
-    //
-    // Apply 50 µs FM pre-emphasis to boost high frequencies.
-    // This is required for FM broadcast to improve SNR at the receiver.
-    //
-    // Filter Type: First-order IIR high-pass filter
-    // Time Constant: 50 µs (FM broadcast standard in Europe/Americas)
-    // Frequency Response: +6 dB/octave above ~3.18 kHz
-    //
-    // Purpose:
-    //   Pre-emphasis compensates for FM's inherent high-frequency noise.
-    //   The receiver applies de-emphasis (inverse filter) to restore flat response.
-    //
-    t0 = t1;  // Start timing Stage 2
-    preemphasis_.process(rx_f32_, frames_read);
-    if (Config::LEVEL_TAPS_ENABLE)
+    // Apply 50 µs pre-emphasis when enabled. Otherwise, bypass this stage.
+    if (Config::ENABLE_PREEMPHASIS)
     {
-        float pre_pk = peak_interleaved_abs(rx_f32_, frames_read);
-        if (pre_pk > s_peak_pre) s_peak_pre = pre_pk;
+        t0 = t1;  // Start timing Stage 2
+        preemphasis_.process(rx_f32_, frames_read);
+        if (Config::LEVEL_TAPS_ENABLE)
+        {
+            float pre_pk = peak_interleaved_abs(rx_f32_, frames_read);
+            if (pre_pk > s_peak_pre) s_peak_pre = pre_pk;
+        }
+        t1                 = ESP.getCycleCount();
+        uint32_t stage2_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
+        stats_.stage_preemphasis.update(stage2_us);
     }
-    t1                 = ESP.getCycleCount();
-    uint32_t stage2_us = (t1 - t0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
-    stats_.stage_preemphasis.update(stage2_us);
 
     // ============================================================================
     // STAGE 3: 19 kHz Notch Filter
@@ -588,9 +580,9 @@ void DSP_pipeline::process()
     // Sub-stage 6a: Generate phase-coherent carriers from master 19 kHz NCO
     // Pilot = 19 kHz, Subcarrier = 38 kHz (2nd harmonic), RDS = 57 kHz (3rd harmonic)
     // Generate carriers only if needed for this block
-    bool need19 = Config::ENABLE_PILOT;
-    bool need38 = (Config::ENABLE_AUDIO && Config::ENABLE_SUBCARRIER_38K);   // DSB uses 38 kHz subcarrier
-    bool need57 = Config::ENABLE_RDS;     // RDS subcarrier at 57 kHz
+    bool need19 = Config::ENABLE_STEREO_PILOT_19K;
+    bool need38 = (Config::ENABLE_AUDIO && Config::ENABLE_STEREO_SUBCARRIER_38K);   // DSB uses 38 kHz subcarrier
+    bool need57 = Config::ENABLE_RDS_57K;     // RDS subcarrier at 57 kHz
     if (need19 || need38 || need57)
     {
         pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_, samples);
@@ -604,7 +596,7 @@ void DSP_pipeline::process()
     // Sub-stage 6c: RDS Injection (Optional)
     // Adds RDS (Radio Data System) subcarrier at 57 kHz
     // RDS carries station info, song metadata, traffic alerts, etc.
-    if (Config::ENABLE_RDS)
+    if (Config::ENABLE_RDS_57K)
     {
         uint32_t t_r0 = ESP.getCycleCount();  // Time RDS processing separately
 

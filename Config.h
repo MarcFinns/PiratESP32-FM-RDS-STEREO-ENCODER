@@ -236,14 +236,14 @@ namespace Config
      * Feature toggles for MPX components
      *
      * ENABLE_AUDIO: Includes program audio into the composite (mono and L-R)
-     * ENABLE_PILOT: Includes the 19 kHz pilot tone
-     * ENABLE_RDS:   Includes the 57 kHz RDS subcarrier
-     * ENABLE_SUBCARRIER_38K: Enables the 38 kHz stereo subcarrier (L−R DSB)
+     * ENABLE_STEREO_PILOT_19K: Includes the 19 kHz pilot tone
+     * ENABLE_RDS_57K:   Includes the 57 kHz RDS subcarrier
+     * ENABLE_STEREO_SUBCARRIER_38K: Enables the 38 kHz stereo subcarrier (L−R DSB)
      */
-    constexpr bool ENABLE_AUDIO          = true;
-    constexpr bool ENABLE_PILOT          = true;
-    constexpr bool ENABLE_RDS            = true;
-    constexpr bool ENABLE_SUBCARRIER_38K = true;
+    constexpr bool ENABLE_AUDIO                 = true;
+    constexpr bool ENABLE_STEREO_PILOT_19K      = true;
+    constexpr bool ENABLE_RDS_57K               = true;
+    constexpr bool ENABLE_STEREO_SUBCARRIER_38K = true;
 
     /**
      * Enable/Disable Pre-emphasis
