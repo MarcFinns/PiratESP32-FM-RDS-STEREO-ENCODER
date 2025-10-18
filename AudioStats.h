@@ -72,6 +72,7 @@ struct AudioStats
   uint64_t last_print_us = 0;
 
   StageTiming total;
+  StageTiming stage_i2s_rx_wait;   // New: I2S RX blocking wait time
   StageTiming stage_int_to_float;
   StageTiming stage_preemphasis;
   StageTiming stage_notch;
@@ -92,6 +93,7 @@ struct AudioStats
     start_time_us = 0;
     last_print_us = 0;
     total.reset();
+    stage_i2s_rx_wait.reset();
     stage_int_to_float.reset();
     stage_preemphasis.reset();
     stage_notch.reset();

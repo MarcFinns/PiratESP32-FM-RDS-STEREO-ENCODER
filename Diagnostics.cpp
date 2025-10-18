@@ -48,6 +48,7 @@
 #include "Diagnostics.h"
 
 #include <Arduino.h>
+#include "Log.h"
 #include <esp_timer.h>
 
 #include "dsps_dotprod.h"
@@ -56,7 +57,8 @@ namespace Diagnostics
 {
 void verifySIMD()
 {
-  Serial.println("\n=== TESTING IF SIMD IS ACTIVE ===");
+  Log::printOrSerial(LogLevel::INFO, "");
+  Log::printOrSerial(LogLevel::INFO, "=== TESTING IF SIMD IS ACTIVE ===");
 
   alignas(16) float test_a[24] = {1,  2,  3,  4,  5,  6,  7,  8,
                                   9,  10, 11, 12, 13, 14, 15, 16,
@@ -73,25 +75,29 @@ void verifySIMD()
   }
   uint32_t elapsed = esp_timer_get_time() - start;
 
-  Serial.printf("Dot product result: %.1f (expect 300.0)\n", result);
-  Serial.printf("Time for 1000 iterations: %u µs\n", elapsed);
-  Serial.printf("Average per call: %.2f µs\n", elapsed / 1000.0f);
+  Log::printfOrSerial(LogLevel::INFO, "Dot product result: %.1f (expect 300.0)", result);
+  Log::printfOrSerial(LogLevel::INFO, "Time for 1000 iterations: %u µs", elapsed);
+  Log::printfOrSerial(LogLevel::INFO, "Average per call: %.2f µs", elapsed / 1000.0f);
 
   if (elapsed > 100000)
   {
-    Serial.println("\n⚠⚠⚠ SIMD IS NOT WORKING! ⚠⚠⚠");
-    Serial.println("Expected: ~20-40 µs per 1000 calls WITH SIMD");
-    Serial.println("Got: >100 µs (SCALAR MODE)");
-    Serial.println("\nPossible causes:");
-    Serial.println("1. esp-dsp not compiled with SIMD support");
-    Serial.println("2. Wrong library version");
-    Serial.println("3. Compiler flags missing");
+    Log::printOrSerial(LogLevel::WARN, "");
+    Log::printOrSerial(LogLevel::WARN, "⚠⚠⚠ SIMD IS NOT WORKING! ⚠⚠⚠");
+    Log::printOrSerial(LogLevel::WARN, "Expected: ~20-40 µs per 1000 calls WITH SIMD");
+    Log::printOrSerial(LogLevel::WARN, "Got: >100 µs (SCALAR MODE)");
+    Log::printOrSerial(LogLevel::WARN, "");
+    Log::printOrSerial(LogLevel::WARN, "Possible causes:");
+    Log::printOrSerial(LogLevel::WARN, "1. esp-dsp not compiled with SIMD support");
+    Log::printOrSerial(LogLevel::WARN, "2. Wrong library version");
+    Log::printOrSerial(LogLevel::WARN, "3. Compiler flags missing");
   }
   else
   {
-    Serial.println("\n✓ SIMD IS WORKING CORRECTLY!");
+    Log::printOrSerial(LogLevel::INFO, "");
+    Log::printOrSerial(LogLevel::INFO, "✓ SIMD IS WORKING CORRECTLY!");
   }
-  Serial.println("=====================================\n");
+  Log::printOrSerial(LogLevel::INFO, "=====================================");
+  Log::printOrSerial(LogLevel::INFO, "");
 }
 
 int32_t findPeakAbs(const int32_t *buffer, std::size_t samples)
@@ -107,4 +113,3 @@ int32_t findPeakAbs(const int32_t *buffer, std::size_t samples)
   return peak;
 }
 } // namespace Diagnostics
-

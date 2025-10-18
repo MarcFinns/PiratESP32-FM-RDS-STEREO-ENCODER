@@ -55,8 +55,10 @@
 #include "I2SDriver.h"
 
 #include "Config.h"
+#include "Log.h"
 
 #include <Arduino.h>
+#include <cstdarg>
 #include <driver/i2s.h>
 
 namespace AudioIO
@@ -73,6 +75,25 @@ namespace AudioIO
 
     namespace
     {
+        inline void log_via_logger_or_serial(LogLevel level, const char *fmt, ...)
+        {
+            char buf[160];
+            va_list ap;
+            va_start(ap, fmt);
+            vsnprintf(buf, sizeof(buf), fmt, ap);
+            va_end(ap);
+            if (!Log::enqueue(level, buf))
+            {
+                if (level == LogLevel::ERROR)
+                {
+                    Serial.printf("[ERROR] %s\n", buf);
+                }
+                else
+                {
+                    Serial.println(buf);
+                }
+            }
+        }
         /**
          * I2S Port for TX (DAC Output)
          *
@@ -113,7 +134,7 @@ namespace AudioIO
         using namespace Config;
 
         // ---- Log Initialization Start ----
-        Serial.println("Initializing I2S TX (DAC @ 192kHz)...");
+        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S TX (DAC @ 192kHz)...");
 
         // ---- Configure I2S Driver ----
         //
@@ -188,7 +209,7 @@ namespace AudioIO
         if (ret != ESP_OK)
         {
             // Driver installation failed (likely out of memory or invalid params)
-            Serial.printf("Failed to install TX driver: %d\n", ret);
+            log_via_logger_or_serial(LogLevel::ERROR, "Failed to install TX driver: %d", ret);
             return false;
         }
 
@@ -219,27 +240,27 @@ namespace AudioIO
         if (ret != ESP_OK)
         {
             // Pin configuration failed (likely invalid GPIO numbers)
-            Serial.printf("Failed to set TX pins: %d\n", ret);
+            log_via_logger_or_serial(LogLevel::ERROR, "Failed to set TX pins: %d", ret);
             return false;
         }
 
         // ---- Log Success and Clock Frequencies ----
         //
         // Print diagnostic information to help verify correct configuration.
-        Serial.println("I2S TX initialized successfully");
-        Serial.printf("  Sample Rate: %u Hz\n", SAMPLE_RATE_DAC);
+        log_via_logger_or_serial(LogLevel::INFO, "I2S TX initialized successfully");
+        log_via_logger_or_serial(LogLevel::INFO, "  Sample Rate: %u Hz", SAMPLE_RATE_DAC);
 
         // MCLK frequency: 192,000 Hz × 128 = 24.576 MHz
-        Serial.printf("  MCLK: %.3f MHz (GPIO%d)\n",
-                      (SAMPLE_RATE_DAC * 128) / 1'000'000.0f, PIN_MCLK);
+        log_via_logger_or_serial(LogLevel::INFO, "  MCLK: %.3f MHz (GPIO%d)",
+                                 (SAMPLE_RATE_DAC * 128) / 1'000'000.0f, PIN_MCLK);
 
         // BCK frequency: 192,000 Hz × 64 = 12.288 MHz
         // (64 = 32 bits × 2 channels per sample period)
-        Serial.printf("  BCK: %.3f MHz (GPIO%d)\n",
-                      (SAMPLE_RATE_DAC * 64) / 1'000'000.0f, PIN_DAC_BCK);
+        log_via_logger_or_serial(LogLevel::INFO, "  BCK: %.3f MHz (GPIO%d)",
+                                 (SAMPLE_RATE_DAC * 64) / 1'000'000.0f, PIN_DAC_BCK);
 
         // LRCK frequency: Same as sample rate (192 kHz)
-        Serial.printf("  LRCK: %u Hz (GPIO%d)\n", SAMPLE_RATE_DAC, PIN_DAC_LRCK);
+        log_via_logger_or_serial(LogLevel::INFO, "  LRCK: %u Hz (GPIO%d)", SAMPLE_RATE_DAC, PIN_DAC_LRCK);
 
         return true;
     }
@@ -268,7 +289,7 @@ namespace AudioIO
         using namespace Config;
 
         // ---- Log Initialization Start ----
-        Serial.println("Initializing I2S RX (ADC @ 48kHz)...");
+        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S RX (ADC @ 48kHz)...");
 
         // ---- Configure I2S Driver ----
         //
@@ -340,7 +361,7 @@ namespace AudioIO
         if (ret != ESP_OK)
         {
             // Driver installation failed
-            Serial.printf("Failed to install RX driver: %d\n", ret);
+            log_via_logger_or_serial(LogLevel::ERROR, "Failed to install RX driver: %d", ret);
             return false;
         }
 
@@ -371,24 +392,24 @@ namespace AudioIO
         if (ret != ESP_OK)
         {
             // Pin configuration failed
-            Serial.printf("Failed to set RX pins: %d\n", ret);
+            log_via_logger_or_serial(LogLevel::ERROR, "Failed to set RX pins: %d", ret);
             return false;
         }
 
         // ---- Log Success and Clock Frequencies ----
-        Serial.println("I2S RX initialized successfully");
-        Serial.printf("  Sample Rate: %u Hz\n", SAMPLE_RATE_ADC);
+        log_via_logger_or_serial(LogLevel::INFO, "I2S RX initialized successfully");
+        log_via_logger_or_serial(LogLevel::INFO, "  Sample Rate: %u Hz", SAMPLE_RATE_ADC);
 
         // MCLK frequency: 48,000 Hz × 512 = 24.576 MHz (shared from TX)
-        Serial.printf("  MCLK: %.3f MHz (from TX GPIO%d)\n",
-                      (SAMPLE_RATE_ADC * 512) / 1'000'000.0f, PIN_MCLK);
+        log_via_logger_or_serial(LogLevel::INFO, "  MCLK: %.3f MHz (from TX GPIO%d)",
+                                 (SAMPLE_RATE_ADC * 512) / 1'000'000.0f, PIN_MCLK);
 
         // BCK frequency: 48,000 Hz × 64 = 3.072 MHz
-        Serial.printf("  BCK: %.3f MHz (GPIO%d)\n",
-                      (SAMPLE_RATE_ADC * 64) / 1'000'000.0f, PIN_ADC_BCK);
+        log_via_logger_or_serial(LogLevel::INFO, "  BCK: %.3f MHz (GPIO%d)",
+                                 (SAMPLE_RATE_ADC * 64) / 1'000'000.0f, PIN_ADC_BCK);
 
         // LRCK frequency: Same as sample rate (48 kHz)
-        Serial.printf("  LRCK: %u Hz (GPIO%d)\n", SAMPLE_RATE_ADC, PIN_ADC_LRCK);
+        log_via_logger_or_serial(LogLevel::INFO, "  LRCK: %u Hz (GPIO%d)", SAMPLE_RATE_ADC, PIN_ADC_LRCK);
 
         return true;
     }

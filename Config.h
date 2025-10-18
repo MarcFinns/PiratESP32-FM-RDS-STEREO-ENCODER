@@ -184,7 +184,7 @@ constexpr uint32_t LOGGER_PRIORITY = 2; // Medium priority
 /** Logger: Stack Size (32-bit words) */
 constexpr uint32_t LOGGER_STACK_WORDS = 4096; // 16 KB
 /** Logger: Message Queue Capacity */
-constexpr std::size_t LOGGER_QUEUE_LEN = 128; // 128 messages buffer
+constexpr std::size_t LOGGER_QUEUE_LEN = 256; // Larger buffer for verbose init
 
 /** ---- VU METER TASK ---- */
 /** VU Meter: Core Assignment (0 or 1) */

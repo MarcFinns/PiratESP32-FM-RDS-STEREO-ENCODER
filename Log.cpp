@@ -164,6 +164,56 @@ bool Log::enqueue(LogLevel level, const char *msg)
     return getInstance().enqueueRaw(level, msg);
 }
 
+bool Log::printOrSerial(LogLevel level, const char *msg)
+{
+    Log &inst = getInstance();
+    if (inst.queue_ && msg)
+    {
+        return inst.enqueueRaw(level, msg);
+    }
+    if (msg)
+    {
+        const char *lvl = (level == LogLevel::ERROR) ? "ERROR" :
+                          (level == LogLevel::WARN)  ? "WARN"  :
+                          (level == LogLevel::INFO)  ? "INFO"  : "DEBUG";
+        Serial.printf("[%s] %s\n", lvl, msg);
+    }
+    return false;
+}
+
+bool Log::printfOrSerial(LogLevel level, const char *fmt, ...)
+{
+    if (!fmt)
+        return false;
+
+    Log &inst = getInstance();
+
+    if (inst.queue_)
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        bool ok = inst.enqueueFormatted(level, fmt, ap);
+        va_end(ap);
+        return ok;
+    }
+
+    char buf[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    const char *lvl = (level == LogLevel::ERROR) ? "ERROR" :
+                      (level == LogLevel::WARN)  ? "WARN"  :
+                      (level == LogLevel::INFO)  ? "INFO"  : "DEBUG";
+    Serial.printf("[%s] %s\n", lvl, buf);
+    return false;
+}
+
+bool Log::isReady()
+{
+    return getInstance().isRunning();
+}
+
 // ==================================================================================
 //                          MODULEBASE IMPLEMENTATION
 // ==================================================================================
@@ -204,6 +254,18 @@ bool Log::begin()
 
     // Print runtime pinning info via Serial to avoid recursion during logger init
     Serial.printf("Logger running on Core %d\n", xPortGetCoreID());
+
+    // ---- Emit startup banner via logger queue ----
+    // These messages will be printed once the process loop starts
+    enqueueRaw(LogLevel::INFO, "========================================");
+    enqueueRaw(LogLevel::INFO, "PiratESP32 FM RDS STEREO ENCODER");
+    enqueueRaw(LogLevel::INFO, "Copyright (c) 2024-2025 PiratESP32 contributors");
+    {
+        char build[96];
+        snprintf(build, sizeof(build), "Build: %s %s", __DATE__, __TIME__);
+        enqueueRaw(LogLevel::INFO, build);
+    }
+    enqueueRaw(LogLevel::INFO, "========================================");
 
     return true;
 }

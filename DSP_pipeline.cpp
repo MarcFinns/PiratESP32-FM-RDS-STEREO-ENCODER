@@ -170,11 +170,13 @@ bool DSP_pipeline::begin()
  * Encapsulates Stage 1: I2S read + int→float conversion + VU metrics
  */
 bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, float &r_peak,
-                                       float &l_rms, float &r_rms)
+                                       float &l_rms, float &r_rms, uint32_t &rx_wait_us,
+                                       uint32_t cpu_mhz, uint32_t &deint_us)
 {
     using namespace Config;
 
     size_t bytes_read = 0;
+    uint32_t tr0 = ESP.getCycleCount();
     if (!hardware_driver_->read(rx_buffer_, sizeof(rx_buffer_), bytes_read,
                                 Config::I2S_READ_TIMEOUT_MS))
     {
@@ -205,6 +207,8 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
         ++stats_.errors;
         return false;
     }
+    uint32_t tr1 = ESP.getCycleCount();
+    rx_wait_us = (tr1 - tr0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
 
     if (bytes_read == 0)
         return false;
@@ -214,6 +218,7 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
         return false;
 
     // Convert Q31 to float and calculate VU levels
+    uint32_t tc0 = ESP.getCycleCount();
     float l_sum_sq = 0.0f, r_sum_sq = 0.0f;
     l_peak = 0.0f;
     r_peak = 0.0f;
@@ -243,6 +248,8 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
 
     l_rms = (frames_read > 0) ? sqrtf(l_sum_sq / static_cast<float>(frames_read)) : 0.0f;
     r_rms = (frames_read > 0) ? sqrtf(r_sum_sq / static_cast<float>(frames_read)) : 0.0f;
+    uint32_t tc1 = ESP.getCycleCount();
+    deint_us = (tc1 - tc0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
 
     return true;
 }
@@ -471,14 +478,18 @@ void DSP_pipeline::process()
     std::size_t frames_read = 0;
     float l_peak = 0.0f, r_peak = 0.0f, l_rms = 0.0f, r_rms = 0.0f;
 
-    if (!readAndConvertAudio(frames_read, l_peak, r_peak, l_rms, r_rms))
+    uint32_t rx_wait_us_local = 0;
+    uint32_t deint_us_local = 0;
+    if (!readAndConvertAudio(frames_read, l_peak, r_peak, l_rms, r_rms,
+                             rx_wait_us_local, cpu_mhz, deint_us_local))
     {
         return; // Skip cycle on read error or no data
     }
 
     uint32_t t0 = ESP.getCycleCount();
-    uint32_t stage1_us = (t0 - t_start) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
-    stats_.stage_int_to_float.update(stage1_us);
+    // Update refined timings
+    stats_.stage_i2s_rx_wait.update(rx_wait_us_local);
+    stats_.stage_int_to_float.update(deint_us_local);
 
     updateVUMeters(l_peak, r_peak, l_rms, r_rms, frames_read);
 
@@ -808,7 +819,11 @@ void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us,
     // Per-stage breakdown
     Log::enqueue(LogLevel::INFO, "----------------------------------------");
     Log::enqueue(LogLevel::INFO, "Per-Stage Breakdown:");
-    Log::enqueue(LogLevel::INFO, "  1. Deinterleave (int→float):");
+    Log::enqueue(LogLevel::INFO, "  1a. I2S RX wait (block):");
+    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+                  (double)stats_.stage_i2s_rx_wait.current, (double)stats_.stage_i2s_rx_wait.min,
+                  (double)stats_.stage_i2s_rx_wait.max);
+    Log::enqueue(LogLevel::INFO, "  1b. Deinterleave (int→float):");
     Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_int_to_float.current, (double)stats_.stage_int_to_float.min,
                   (double)stats_.stage_int_to_float.max);

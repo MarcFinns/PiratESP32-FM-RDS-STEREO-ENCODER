@@ -26,6 +26,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <Arduino.h>
 #include <esp_err.h>
 
 // ==================================================================================
@@ -136,7 +137,32 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
 
     hardware_driver_ = hardware_driver;
 
-    // ---- Step 1: Initialize Hardware Driver ----
+    // ---- Step 1: Start Logger Task (first) ----
+    // Logger must be started early so downstream modules can log
+    // Priority 2: Medium, higher than VU meter and RDS
+    if (!Log::startTask(Config::LOGGER_CORE,        // core_id
+                        Config::LOGGER_PRIORITY,    // priority
+                        Config::LOGGER_STACK_WORDS, // stack_words
+                        Config::LOGGER_QUEUE_LEN))  // queue_len
+    {
+        Serial.println("Failed to start Logger task");
+        return false;
+    }
+
+    Log::enqueuef(LogLevel::INFO, "Logger task started on Core %d", Config::LOGGER_CORE);
+
+    // Wait briefly for logger to become ready (queue created, begin() finished)
+    {
+        const int max_wait_ms = 200;
+        int waited = 0;
+        while (!Log::isReady() && waited < max_wait_ms)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            waited += 1;
+        }
+    }
+
+    // ---- Step 2: Initialize Hardware Driver ----
     // This must happen before any DSP operations
     if (!hardware_driver_->initialize())
     {
@@ -151,20 +177,6 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     }
 
     Log::enqueuef(LogLevel::INFO, "Hardware driver initialized");
-
-    // ---- Step 2: Start Logger Task (Core 1) ----
-    // Logger must be started early so downstream modules can log
-    // Priority 2: Medium, higher than VU meter and RDS
-    if (!Log::startTask(Config::LOGGER_CORE,        // core_id
-                        Config::LOGGER_PRIORITY,    // priority
-                        Config::LOGGER_STACK_WORDS, // stack_words
-                        Config::LOGGER_QUEUE_LEN))  // queue_len
-    {
-        Log::enqueuef(LogLevel::ERROR, "Failed to start Logger task");
-        return false;
-    }
-
-    Log::enqueuef(LogLevel::INFO, "Logger task started on Core %d", Config::LOGGER_CORE);
 
     // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging
