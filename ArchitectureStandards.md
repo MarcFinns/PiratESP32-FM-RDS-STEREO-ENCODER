@@ -136,16 +136,28 @@ namespace Module {
 
 ### 2.2 Core Allocation Strategy
 
+Core assignments are configurable at build time via `Config.h`. The typical default is:
+
 **Core 0 (Real-Time Audio)**:
-- `DSP_pipeline` (priority 6) - cannot be interrupted
-- No I/O or system calls
-- Deterministic timing required
+- `DSP_pipeline` (highest priority)
+- Deterministic timing; keep I/O off this core
 
 **Core 1 (I/O & Services)**:
-- `Log` (priority 2) - Serial I/O, logging
-- `VUMeter` (priority 1) - Display rendering
-- `RDSAssembler` (priority 1) - RDS generation
-- Arduino loop (priority 0) - Main idle task
+- `Log` (medium priority)
+- `VUMeter` (low priority)
+- `RDSAssembler` (low priority)
+- Arduino loop (idle)
+
+Config parameters controlling pinning and priorities:
+```
+// Core selection (0 or 1)
+LOGGER_CORE, VU_CORE, RDS_CORE, DSP_CORE
+// Priorities and stacks
+LOGGER_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
+LOGGER_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
+```
+
+Runtime verification: at startup each module logs its actual core ("… running on Core X"). The status panel CPU metrics also reflect the real assignment.
 
 ---
 

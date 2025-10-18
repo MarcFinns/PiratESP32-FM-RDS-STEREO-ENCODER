@@ -18,6 +18,7 @@
 
 #include "SystemContext.h"
 #include "DSP_pipeline.h"
+#include "ErrorHandler.h"
 #include "IHardwareDriver.h"
 #include "Log.h"
 #include "RDSAssembler.h"
@@ -25,6 +26,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_err.h>
 
 // ==================================================================================
 //                          SINGLETON INSTANCE
@@ -138,8 +140,13 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     // This must happen before any DSP operations
     if (!hardware_driver_->initialize())
     {
-        int err = hardware_driver_->getErrorStatus();
-        Log::enqueuef(LogLevel::ERROR, "Hardware driver init failed: %d", err);
+        int  perr = hardware_driver_->getErrorStatus();
+        const char* err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
+
+        // Map to top-level init failure and log via ErrorHandler with context
+        ErrorHandler::logError(ErrorCode::INIT_HARDWARE_FAILED,
+                               "SystemContext::initialize",
+                               err_name);
         return false;
     }
 
@@ -157,7 +164,7 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
         return false;
     }
 
-    Log::enqueuef(LogLevel::INFO, "Logger task started on Core 1");
+    Log::enqueuef(LogLevel::INFO, "Logger task started on Core %d", Config::LOGGER_CORE);
 
     // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging
@@ -187,7 +194,7 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
         }
         else
         {
-            Log::enqueuef(LogLevel::INFO, "RDS Assembler task started on Core 1");
+            Log::enqueuef(LogLevel::INFO, "RDS Assembler task started on Core %d", Config::RDS_CORE);
         }
     }
 

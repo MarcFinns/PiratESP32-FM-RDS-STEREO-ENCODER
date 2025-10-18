@@ -39,6 +39,7 @@
 #include <Arduino.h>
 #include <esp32-hal-cpu.h>
 #include <esp_timer.h>
+#include <freertos/task.h>
 #include <esp_err.h>
 
 #include <algorithm>
@@ -111,6 +112,7 @@ bool DSP_pipeline::begin()
 {
     // Log system configuration
     Log::enqueue(LogLevel::INFO, "ESP32-S3 Audio DSP: 48kHz -> 192kHz");
+    Log::enqueuef(LogLevel::INFO, "DSP_pipeline running on Core %d", xPortGetCoreID());
 
     // Verify SIMD/ESP32-S3 specific optimizations are available
     Diagnostics::verifySIMD();
@@ -176,16 +178,29 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
     if (!hardware_driver_->read(rx_buffer_, sizeof(rx_buffer_), bytes_read,
                                 Config::I2S_READ_TIMEOUT_MS))
     {
-        int err = hardware_driver_->getErrorStatus();
-        if (err == ESP_ERR_TIMEOUT)
+        auto derr = hardware_driver_->getLastError();
+        int  perr = hardware_driver_->getErrorStatus();
+        const char* err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
+        char details[96];
+        switch (derr)
         {
-            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::readAndConvertAudio",
-                                   "I2S RX timeout");
-        }
-        else
-        {
-            ErrorHandler::logError(ErrorCode::I2S_READ_ERROR, "DSP_pipeline::readAndConvertAudio",
-                                   "I2S RX read failed");
+        case DriverError::Timeout:
+            snprintf(details, sizeof(details), "I2S RX timeout (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::readAndConvertAudio", details);
+            break;
+        case DriverError::InvalidArgument:
+            snprintf(details, sizeof(details), "I2S RX invalid arg (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::INVALID_PARAM, "DSP_pipeline::readAndConvertAudio", details);
+            break;
+        case DriverError::InvalidState:
+        case DriverError::NotInitialized:
+            snprintf(details, sizeof(details), "I2S RX not ready (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::I2S_NOT_INITIALIZED, "DSP_pipeline::readAndConvertAudio", details);
+            break;
+        default:
+            snprintf(details, sizeof(details), "I2S RX error (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::I2S_READ_ERROR, "DSP_pipeline::readAndConvertAudio", details);
+            break;
         }
         ++stats_.errors;
         return false;
@@ -312,16 +327,29 @@ void DSP_pipeline::writeToDAC(std::size_t frames_read)
     if (!hardware_driver_->write(tx_buffer_, bytes_to_write, bytes_written,
                                  Config::I2S_WRITE_TIMEOUT_MS))
     {
-        int err = hardware_driver_->getErrorStatus();
-        if (err == ESP_ERR_TIMEOUT)
+        auto derr = hardware_driver_->getLastError();
+        int  perr = hardware_driver_->getErrorStatus();
+        const char* err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
+        char details[96];
+        switch (derr)
         {
-            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::writeToDAC",
-                                   "I2S TX timeout");
-        }
-        else
-        {
-            ErrorHandler::logError(ErrorCode::I2S_WRITE_ERROR, "DSP_pipeline::writeToDAC",
-                                   "I2S TX write failed");
+        case DriverError::Timeout:
+            snprintf(details, sizeof(details), "I2S TX timeout (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::writeToDAC", details);
+            break;
+        case DriverError::InvalidArgument:
+            snprintf(details, sizeof(details), "I2S TX invalid arg (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::INVALID_PARAM, "DSP_pipeline::writeToDAC", details);
+            break;
+        case DriverError::InvalidState:
+        case DriverError::NotInitialized:
+            snprintf(details, sizeof(details), "I2S TX not ready (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::I2S_NOT_INITIALIZED, "DSP_pipeline::writeToDAC", details);
+            break;
+        default:
+            snprintf(details, sizeof(details), "I2S TX error (esp:%s)", err_name);
+            ErrorHandler::logError(ErrorCode::I2S_WRITE_ERROR, "DSP_pipeline::writeToDAC", details);
+            break;
         }
         ++stats_.errors;
     }

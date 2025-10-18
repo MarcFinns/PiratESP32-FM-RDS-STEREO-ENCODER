@@ -17,6 +17,7 @@
  * =====================================================================================
  */
 #include "RDSAssembler.h"
+#include "Log.h"
 
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -214,6 +215,7 @@ void RDSAssembler::taskTrampoline(void *arg)
 
 bool RDSAssembler::begin()
 {
+    Log::enqueuef(LogLevel::INFO, "RDSAssembler running on Core %d", xPortGetCoreID());
     // Create FreeRTOS queue for RDS bits
     bit_queue_ = xQueueCreate((UBaseType_t)bit_queue_len_, sizeof(uint8_t));
     if (!bit_queue_)

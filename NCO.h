@@ -23,14 +23,14 @@
  *   A numerically controlled oscillator maintains a normalized phase accumulator
  *   that rotates through [0,1) representing a complete 2π rotation:
  *     phase[n+1] = (phase[n] + phase_increment) mod 1.0
- *     output = cos(2π · phase)
+ *     output = sin(2π · phase)
  *
  *   This discrete-time approach is exact and requires no trigonometric functions
  *   (phase_increment is precomputed from f_desired and f_sample at initialization).
  *
  * Waveform Synthesis:
- *   • Cosine LUT: 1024-entry sine table with linear interpolation
- *   • Harmonic generation: cos(1×phase), cos(2×phase), cos(3×phase) computed
+ *   • Sine LUT: 1024-entry sine table with linear interpolation
+ *   • Harmonic generation: sin(1×phase), sin(2×phase), sin(3×phase) computed
  *     from single master phase in one pass
  *   • Output range: [-1.0, 1.0]
  *
@@ -60,7 +60,7 @@ public:
   void reset();
 
   // Generate coherent harmonics from the master phase:
-  //  pilot_out = cos(1×phase), sub_out = cos(2×phase), rds_out = cos(3×phase)
+  //  pilot_out = sin(1×phase), sub_out = sin(2×phase), rds_out = sin(3×phase)
   // Any of the output pointers can be nullptr to skip generation.
   void generate_harmonics(float *pilot_out, float *sub_out, float *rds_out, std::size_t len);
 

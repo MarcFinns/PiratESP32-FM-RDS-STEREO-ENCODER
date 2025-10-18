@@ -177,42 +177,42 @@ constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
 //   Level 0: Idle task (system)
 
 /** ---- LOGGER TASK ---- */
-/** Logger: Core Assignment */
-constexpr int LOGGER_CORE = 1;                          // Core 1 (I/O core)
+/** Logger: Core Assignment (0 or 1) */
+constexpr int LOGGER_CORE = 0; // Core selection for Logger task
 /** Logger: Task Priority */
-constexpr uint32_t LOGGER_PRIORITY = 2;                 // Medium priority
+constexpr uint32_t LOGGER_PRIORITY = 2; // Medium priority
 /** Logger: Stack Size (32-bit words) */
-constexpr uint32_t LOGGER_STACK_WORDS = 4096;           // 16 KB
+constexpr uint32_t LOGGER_STACK_WORDS = 4096; // 16 KB
 /** Logger: Message Queue Capacity */
-constexpr std::size_t LOGGER_QUEUE_LEN = 128;           // 128 messages buffer
+constexpr std::size_t LOGGER_QUEUE_LEN = 128; // 128 messages buffer
 
 /** ---- VU METER TASK ---- */
-/** VU Meter: Core Assignment */
-constexpr int VU_CORE = 0;                              // Core 0 (can run on same core)
+/** VU Meter: Core Assignment (0 or 1) */
+constexpr int VU_CORE = 1; // Core selection for VU task
 /** VU Meter: Task Priority */
-constexpr uint32_t VU_PRIORITY = 1;                     // Low priority
+constexpr uint32_t VU_PRIORITY = 1; // Low priority
 /** VU Meter: Stack Size (32-bit words) */
-constexpr uint32_t VU_STACK_WORDS = 4096;               // 16 KB
+constexpr uint32_t VU_STACK_WORDS = 4096; // 16 KB
 /** VU Meter: Sample Queue (Mailbox Pattern) */
-constexpr std::size_t VU_QUEUE_LEN = 1;                 // Mailbox: holds only latest
+constexpr std::size_t VU_QUEUE_LEN = 1; // Mailbox: holds only latest
 
 /** ---- RDS ASSEMBLER TASK ---- */
-/** RDS Assembler: Core Assignment */
-constexpr int RDS_CORE = 1;                             // Core 1 (I/O core)
+/** RDS Assembler: Core Assignment (0 or 1) */
+constexpr int RDS_CORE = 0; // Core selection for RDS assembler
 /** RDS Assembler: Task Priority */
-constexpr uint32_t RDS_PRIORITY = 1;                    // Low priority
+constexpr uint32_t RDS_PRIORITY = 1; // Low priority
 /** RDS Assembler: Stack Size (32-bit words) */
-constexpr uint32_t RDS_STACK_WORDS = 4096;              // 16 KB
+constexpr uint32_t RDS_STACK_WORDS = 4096; // 16 KB
 /** RDS Assembler: Bit Queue Capacity */
-constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024;         // 1024 bits buffer
+constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024; // 1024 bits buffer
 
 /** ---- DSP PIPELINE TASK ---- */
-/** DSP Pipeline: Core Assignment */
-constexpr int DSP_CORE = 0;                             // Core 0 (dedicated audio)
+/** DSP Pipeline: Core Assignment (0 or 1) */
+constexpr int DSP_CORE = 1; // Core selection for DSP pipeline
 /** DSP Pipeline: Task Priority */
-constexpr uint32_t DSP_PRIORITY = 6;                    // Highest priority
+constexpr uint32_t DSP_PRIORITY = 6; // Highest priority
 /** DSP Pipeline: Stack Size (32-bit words) */
-constexpr uint32_t DSP_STACK_WORDS = 12288;             // 48 KB (DSP buffers)
+constexpr uint32_t DSP_STACK_WORDS = 12288; // 48 KB (DSP buffers)
 
 // ==================================================================================
 //                         PRE-EMPHASIS FILTER PARAMETERS

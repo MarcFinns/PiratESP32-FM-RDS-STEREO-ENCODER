@@ -157,6 +157,30 @@ VU_DISPLAY_ENABLED = true // Enable/disable TFT display
 VU_USE_PEAK_FOR_BAR = true // Peak (true) or RMS (false) mode
 ```
 
+### Task Pinning (Config-controlled)
+
+Task-to-core assignment is configured exclusively in `Config.h` and applied at runtime by the SystemContext and each module’s startTask:
+
+```
+// Config.h core selections (0 or 1)
+LOGGER_CORE    // Logger task core
+VU_CORE        // VU display task core
+RDS_CORE       // RDS assembler task core
+DSP_CORE       // DSP pipeline task core
+
+// Related priorities and stacks are also defined in Config.h
+LOGGER_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
+LOGGER_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
+```
+
+At startup, each module logs its actual core, for example:
+- "Logger running on Core X" (Serial)
+- "VUMeter running on Core X"
+- "RDSAssembler running on Core X"
+- "DSP_pipeline running on Core X"
+
+Use these messages and the status panel CPU metrics to verify your pinning after editing `Config.h`.
+
 ### GPIO Pin Customization
 
 Edit pin assignments in `Config.h` to match your hardware.

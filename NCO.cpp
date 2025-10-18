@@ -25,8 +25,8 @@
  *     • RDS carrier (57 kHz): 3× phase (exactly 3× pilot for phase lock)
  *
  * Waveform Generation:
- *   Uses cosine LUT-based synthesis with linear interpolation:
- *     cos(2π·φ) ≈ sin_table[φ × TABLE_SIZE] with interpolation between entries
+ *   Uses sine LUT-based synthesis with linear interpolation:
+ *     sin(2π·φ) ≈ sin_table[φ × TABLE_SIZE] with interpolation between entries
  *
  *   Benefits:
  *     • No trigonometric function calls (fast on embedded)
@@ -35,7 +35,7 @@
  *
  * Static Lookup Table:
  *   Initialized once during first NCO construction (thread-safe for single-core setup).
- *   Contains one period of sine, accessed via cosine phase shift (π/2 offset).
+ *   Contains one period of sine, accessed directly (no phase shift applied).
  *
  * Thread Safety:
  *   Per-instance state (phase_, phase_inc_) is not thread-safe. The static LUT
@@ -91,7 +91,7 @@ void NCO::reset()
 
 void NCO::init_table()
 {
-    // Precompute one period of sine; cosine is obtained via 90° phase shift
+    // Precompute one period of sine
     for (std::size_t i = 0; i < TABLE_SIZE; ++i)
     {
         sin_table_[i] = std::sinf(kTwoPi * static_cast<float>(i) /
@@ -125,7 +125,7 @@ void NCO::generate_harmonics(float *pilot_out, float *sub_out, float *rds_out, s
         float p3 = (phase_ * 3.0f);             // 3×phase (sine)
         if (p3 >= 1.0f) p3 -= 1.0f;
 
-        auto sample_cos = [&](float pf) {
+        auto sample_sine = [&](float pf) {
             float idx_f = pf * static_cast<float>(TABLE_SIZE);
             std::size_t idx = static_cast<std::size_t>(idx_f);
             float frac = idx_f - static_cast<float>(idx);
@@ -134,13 +134,13 @@ void NCO::generate_harmonics(float *pilot_out, float *sub_out, float *rds_out, s
             return s0 + frac * (s1 - s0);
         };
 
-        float c1 = sample_cos(p1);
-        float c2 = sample_cos(p2);
-        float c3 = sample_cos(p3);
+        float s1 = sample_sine(p1);
+        float s2 = sample_sine(p2);
+        float s3 = sample_sine(p3);
 
-        if (pilot_out) pilot_out[i] = c1;
-        if (sub_out) sub_out[i] = c2;
-        if (rds_out) rds_out[i] = c3;
+        if (pilot_out) pilot_out[i] = s1;
+        if (sub_out) sub_out[i] = s2;
+        if (rds_out) rds_out[i] = s3;
 
         phase_ += phase_inc_;
         if (phase_ >= 1.0f) phase_ -= 1.0f;

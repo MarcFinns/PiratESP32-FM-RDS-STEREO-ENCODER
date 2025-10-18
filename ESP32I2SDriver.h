@@ -194,6 +194,11 @@ public:
     int getErrorStatus() const override { return last_error_; }
 
     /**
+     * Get last error (typed)
+     */
+    DriverError getLastError() const override { return last_driver_error_; }
+
+    /**
      * Reset Hardware to Known State
      *
      * Performs soft reset of I2S peripherals.
@@ -226,8 +231,9 @@ private:
     //                          STATE VARIABLES
     // ==================================================================================
 
-    bool is_initialized_;  ///< true if hardware successfully initialized
-    int  last_error_;      ///< Last I2S error code (0 = no error)
+    bool        is_initialized_;     ///< true if hardware successfully initialized
+    int         last_error_;         ///< Last platform error (esp_err_t). 0 = no error
+    DriverError last_driver_error_;  ///< Last error (typed)
 
     // ==================================================================================
     //                          PRIVATE HELPER METHODS
