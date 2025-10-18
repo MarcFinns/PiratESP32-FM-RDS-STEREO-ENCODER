@@ -27,7 +27,23 @@
 //                          CONSTRUCTOR / DESTRUCTOR
 // ==================================================================================
 
-ESP32I2SDriver::ESP32I2SDriver() : is_initialized_(false), last_error_(0)
+namespace {
+static DriverError mapEspError(esp_err_t err, bool is_read)
+{
+    if (err == ESP_OK)
+        return DriverError::None;
+    if (err == ESP_ERR_TIMEOUT)
+        return DriverError::Timeout;
+    if (err == ESP_ERR_INVALID_ARG)
+        return DriverError::InvalidArgument;
+    if (err == ESP_ERR_INVALID_STATE)
+        return DriverError::InvalidState;
+    // Fallback by operation type
+    return is_read ? DriverError::ReadFailed : DriverError::WriteFailed;
+}
+} // namespace
+
+ESP32I2SDriver::ESP32I2SDriver() : is_initialized_(false), last_error_(0), last_driver_error_(DriverError::None)
 {
     // State initialized to not-ready
 }
@@ -57,6 +73,8 @@ bool ESP32I2SDriver::initialize()
     {
         Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: TX initialization failed");
         is_initialized_ = false;
+        last_error_ = ESP_FAIL;
+        last_driver_error_ = DriverError::IoError;
         return false;
     }
 
@@ -69,11 +87,14 @@ bool ESP32I2SDriver::initialize()
         Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: RX initialization failed");
         shutdownTx();
         is_initialized_ = false;
+        last_error_ = ESP_FAIL;
+        last_driver_error_ = DriverError::IoError;
         return false;
     }
 
     is_initialized_ = true;
     last_error_ = 0;
+    last_driver_error_ = DriverError::None;
     Log::enqueue(LogLevel::INFO, "ESP32I2SDriver initialized successfully");
     return true;
 }
@@ -98,6 +119,7 @@ bool ESP32I2SDriver::read(int32_t *buffer, std::size_t buffer_bytes, std::size_t
     if (!is_initialized_)
     {
         last_error_ = ESP_ERR_INVALID_STATE;
+        last_driver_error_ = DriverError::InvalidState;
         bytes_read = 0;
         return false;
     }
@@ -105,6 +127,7 @@ bool ESP32I2SDriver::read(int32_t *buffer, std::size_t buffer_bytes, std::size_t
     if (!buffer || buffer_bytes == 0)
     {
         last_error_ = ESP_ERR_INVALID_ARG;
+        last_driver_error_ = DriverError::InvalidArgument;
         bytes_read = 0;
         return false;
     }
@@ -115,10 +138,12 @@ bool ESP32I2SDriver::read(int32_t *buffer, std::size_t buffer_bytes, std::size_t
     if (ret != ESP_OK)
     {
         last_error_ = ret;
+        last_driver_error_ = mapEspError(ret, /*is_read=*/true);
         return false;
     }
 
     last_error_ = 0;
+    last_driver_error_ = DriverError::None;
     return true;
 }
 
@@ -128,6 +153,7 @@ bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
     if (!is_initialized_)
     {
         last_error_ = ESP_ERR_INVALID_STATE;
+        last_driver_error_ = DriverError::InvalidState;
         bytes_written = 0;
         return false;
     }
@@ -135,6 +161,7 @@ bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
     if (!buffer || buffer_bytes == 0)
     {
         last_error_ = ESP_ERR_INVALID_ARG;
+        last_driver_error_ = DriverError::InvalidArgument;
         bytes_written = 0;
         return false;
     }
@@ -148,10 +175,12 @@ bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
     if (ret != ESP_OK)
     {
         last_error_ = ret;
+        last_driver_error_ = mapEspError(ret, /*is_read=*/false);
         return false;
     }
 
     last_error_ = 0;
+    last_driver_error_ = DriverError::None;
     return true;
 }
 
@@ -162,8 +191,9 @@ bool ESP32I2SDriver::reset()
         return false;
     }
 
-    // Clear error flag
+    // Clear error flags
     last_error_ = 0;
+    last_driver_error_ = DriverError::None;
 
     // Perform I2S reset (if supported by driver)
     // For now, just clear error state

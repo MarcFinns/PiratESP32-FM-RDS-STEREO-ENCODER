@@ -41,7 +41,8 @@ class IHardwareDriver {
     virtual uint32_t getInputSampleRate() const = 0;  // Query input rate
     virtual uint32_t getOutputSampleRate() const = 0; // Query output rate
     virtual bool isReady() const = 0;                 // Status check
-    virtual int getErrorStatus() const = 0;           // Error code
+    virtual int getErrorStatus() const = 0;           // Platform error code (e.g., esp_err_t)
+    virtual DriverError getLastError() const = 0;     // Typed error classification
     virtual bool reset() = 0;                         // Soft reset
 };
 ```
@@ -226,8 +227,12 @@ if (ret != ESP_OK) {
 After refactoring:
 ```cpp
 if (!hardware_driver_->read(rx_buffer_, ..., bytes_read)) {
-    int err = hardware_driver_->getErrorStatus();
-    Log::enqueuef(Log::ERROR, "Read error: %d", err);
+    auto derr = hardware_driver_->getLastError();
+    int  perr = hardware_driver_->getErrorStatus();
+    const char* name = esp_err_to_name((esp_err_t)perr);
+    // Map to ErrorHandler::ErrorCode and include esp_err name for details
+    // Example (timeout):
+    ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::read", name);
 }
 ```
 

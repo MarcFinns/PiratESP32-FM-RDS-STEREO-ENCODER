@@ -157,6 +157,7 @@ bool VUMeter::begin()
     // Initialize display (optional)
     if (Config::VU_DISPLAY_ENABLED)
     {
+        Log::enqueuef(LogLevel::INFO, "VUMeter running on Core %d", xPortGetCoreID());
         if (Config::TFT_BL >= 0)
         {
             pinMode((int)Config::TFT_BL, OUTPUT);

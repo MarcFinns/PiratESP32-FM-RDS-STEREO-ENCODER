@@ -31,6 +31,32 @@
 #include <cstdint>
 
 /**
+ * DriverError - Typed hardware driver error codes
+ *
+ * Provides a platform-agnostic summary of the last failure cause while still
+ * allowing implementations to expose platform-specific details separately
+ * (e.g., ESP-IDF's esp_err_t via getErrorStatus()).
+ */
+enum class DriverError : uint8_t
+{
+    None = 0,
+
+    // Parameter/State
+    InvalidArgument,
+    InvalidState,
+    NotInitialized,
+
+    // I/O specific
+    Timeout,
+    ReadFailed,
+    WriteFailed,
+    IoError,
+
+    // Unknown/other
+    Unknown = 255
+};
+
+/**
  * Hardware Driver Interface
  *
  * Pure virtual interface for audio I/O hardware abstraction.
@@ -220,6 +246,15 @@ public:
      *       See implementation documentation for error code meanings.
      */
     virtual int getErrorStatus() const = 0;
+
+    /**
+     * Get last error (typed)
+     *
+     * Platform-agnostic error classification describing the last failure.
+     * This complements getErrorStatus() which returns the platform-specific
+     * status code (e.g., esp_err_t for ESP-IDF).
+     */
+    virtual DriverError getLastError() const = 0;
 
     /**
      * Reset Hardware to Known State

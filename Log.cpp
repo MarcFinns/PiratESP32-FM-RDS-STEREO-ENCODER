@@ -202,6 +202,9 @@ bool Log::begin()
         return false;
     }
 
+    // Print runtime pinning info via Serial to avoid recursion during logger init
+    Serial.printf("Logger running on Core %d\n", xPortGetCoreID());
+
     return true;
 }
 

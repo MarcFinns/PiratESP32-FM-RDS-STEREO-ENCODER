@@ -129,11 +129,11 @@ void setup()
     //   4. RDS Assembler task (Core 1, priority 1) if enabled
     //   5. DSP Pipeline task (Core 0, priority 6)
     bool initialized =
-        system.initialize(&hw_driver,            // Injected hardware I/O driver
-                          0,                     // dsp_core_id: Core 0 (dedicated audio)
-                          6,                     // dsp_priority: Highest priority
-                          12288,                 // dsp_stack_words: 12KB for DSP buffers
-                          Config::ENABLE_RDS_57K // enable_rds: Enable RDS if configured
+        system.initialize(&hw_driver,                 // Injected hardware I/O driver
+                          Config::DSP_CORE,          // dsp_core_id (from Config.h)
+                          Config::DSP_PRIORITY,      // dsp_priority (from Config.h)
+                          Config::DSP_STACK_WORDS,   // dsp_stack_words (from Config.h)
+                          Config::ENABLE_RDS_57K     // enable_rds: Enable RDS if configured
         );
 
     if (!initialized)
@@ -151,14 +151,14 @@ void setup()
     // Only spawn demo task if RDS is enabled
     if (Config::ENABLE_RDS_57K)
     {
-        // Spawn the RDS demo helper on Core 1 with low priority
-        xTaskCreatePinnedToCore(rds_demo_task, // Task function
-                                "rds_demo",    // Task name
-                                2048,          // Stack size in words
-                                nullptr,       // Task parameter
-                                1,             // Priority (low)
-                                nullptr,       // Task handle (not needed)
-                                1);            // Core ID (Core 1)
+        // Spawn the RDS demo helper using Config core/priority to remain consistent
+        xTaskCreatePinnedToCore(rds_demo_task,       // Task function
+                                "rds_demo",        // Task name
+                                2048,               // Stack size in words
+                                nullptr,            // Task parameter
+                                Config::RDS_PRIORITY, // Priority (match RDS assembler)
+                                nullptr,            // Task handle (not needed)
+                                Config::RDS_CORE);  // Core ID from Config
     }
 
     // At this point, all system modules are running and ready
