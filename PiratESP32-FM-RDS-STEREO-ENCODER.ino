@@ -139,6 +139,7 @@ void setup()
     if (!initialized)
     {
         // Initialization failed - log error and halt
+        Log::printOrSerial(LogLevel::ERROR, "FATAL: System initialization failed!");
         // In production, might implement watchdog recovery or graceful degradation
         while (true)
         {

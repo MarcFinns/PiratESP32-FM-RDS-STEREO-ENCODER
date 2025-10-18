@@ -299,7 +299,8 @@ class DSP_pipeline
      * Read and convert audio from ADC, calculate VU levels
      */
     bool readAndConvertAudio(std::size_t &frames_read, float &l_peak, float &r_peak, float &l_rms,
-                             float &r_rms);
+                             float &r_rms, uint32_t &rx_wait_us, uint32_t cpu_mhz,
+                             uint32_t &deint_us);
 
     /**
      * Update VU meter display with audio levels

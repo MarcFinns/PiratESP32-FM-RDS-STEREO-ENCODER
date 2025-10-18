@@ -175,7 +175,7 @@ class Log : public ModuleBase
      * Example:
      *   Log::enqueuef(LogLevel::INFO, "Audio block %d processed", block);
      */
-    static bool enqueuef(LogLevel level, const char *fmt, ...);
+  static bool enqueuef(LogLevel level, const char *fmt, ...);
 
     /**
      * Enqueue Preformatted Log Message
@@ -196,6 +196,24 @@ class Log : public ModuleBase
      *   Log::enqueue(LogLevel::WARN, "Custom message");
      */
     static bool enqueue(LogLevel level, const char *msg);
+
+    /**
+     * Print via logger if available, otherwise fall back to Serial.
+     * Returns true if enqueued to logger, false if printed via Serial or failed.
+     */
+    static bool printOrSerial(LogLevel level, const char *msg);
+
+  /**
+   * Formatted variant: routes to logger if available, otherwise Serial.printf.
+   * Returns true if enqueued to logger, false if printed via Serial or failed.
+   */
+    static bool printfOrSerial(LogLevel level, const char *fmt, ...);
+
+    /**
+     * Returns true once the logger task has begun and is running
+     * (i.e., queue is created and begin() completed).
+     */
+    static bool isReady();
 
   private:
     /**
@@ -261,7 +279,7 @@ class Log : public ModuleBase
      * Returns:
      *   true if successfully enqueued, false if queue full
      */
-    bool enqueueFormatted(LogLevel level, const char *fmt, va_list ap);
+  bool enqueueFormatted(LogLevel level, const char *fmt, va_list ap);
 
     /**
      * Instance Method - Enqueue Preformatted Message
