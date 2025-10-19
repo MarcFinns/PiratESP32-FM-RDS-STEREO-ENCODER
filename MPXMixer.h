@@ -54,6 +54,12 @@ public:
     /** Construct a mixer with pilot and DSB scaling. */
     MPXMixer(float pilot_amp, float diff_amp);
 
+    /** Set pilot tone amplitude at runtime (0.0 to disable). */
+    inline void setPilotAmp(float amp) { pilot_amp_ = amp; }
+
+    /** Get current pilot tone amplitude. */
+    inline float pilotAmp() const { return pilot_amp_; }
+
     /**
      * Process one 192 kHz block.
      *

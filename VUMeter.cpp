@@ -42,6 +42,7 @@
 
 #include "Config.h"
 #include "Log.h"
+#include "RDSAssembler.h"
 
 #include <Arduino.h>
 #include <algorithm>
@@ -61,6 +62,24 @@ VUMeter &VUMeter::getInstance()
 {
     static VUMeter s_instance;
     return s_instance;
+}
+
+// ----------------------------------------------------------------------------------
+//                      UI Marquee Text (Long-form RT for Display)
+// ----------------------------------------------------------------------------------
+// Independent of the 64-char RDS RT, the UI can present a much longer RT string.
+// This buffer is set via VUMeter::setDisplayRT() and consumed by the process loop.
+static char s_ui_rt_long[1024] = {0};
+
+void VUMeter::setDisplayRT(const char *rt_long)
+{
+    if (!rt_long)
+    {
+        s_ui_rt_long[0] = '\0';
+        return;
+    }
+    strncpy(s_ui_rt_long, rt_long, sizeof(s_ui_rt_long) - 1);
+    s_ui_rt_long[sizeof(s_ui_rt_long) - 1] = '\0';
 }
 
 // ==================================================================================
@@ -182,11 +201,14 @@ bool VUMeter::begin()
             auto drawScale = [&]()
             {
                 static constexpr int DISPLAY_WIDTH = 320;
-                static constexpr int VU_Y = 32;
-                static constexpr int MARGIN_X = 16;
-                static constexpr int VU_LABEL_WIDTH = 14;
+                static constexpr int DISPLAY_HEIGHT = 240;
                 static constexpr int VU_BAR_HEIGHT = 22;
                 static constexpr int VU_BAR_SPACING = 32;
+                static constexpr int BOTTOM_MARGIN = 8;
+                static constexpr int VU_Y =
+                    DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
+                static constexpr int MARGIN_X = 16;
+                static constexpr int VU_LABEL_WIDTH = 14;
                 static constexpr int VU_L_Y = VU_Y;
                 static constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
                 static constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
@@ -244,12 +266,12 @@ bool VUMeter::begin()
                         snprintf(buf, sizeof(buf), "%d", (int)labels[i]);
                     int approx_w = 12 * strlen(buf);
                     int text_x = px - approx_w / 2;
-                    int text_y = MID_SCALE_Y - 8;
+                    int text_y = MID_SCALE_Y - 4;
                     gfx_->setCursor(text_x, text_y);
                     gfx_->print(buf);
                 }
 
-                gfx_->setCursor(x0 + VU_BAR_WIDTH + 4, MID_SCALE_Y - 18);
+                gfx_->setCursor(x0 + VU_BAR_WIDTH + 4, MID_SCALE_Y - 4);
                 gfx_->print("dB");
             };
 
@@ -274,12 +296,14 @@ void VUMeter::process()
     static constexpr int DISPLAY_WIDTH = 320;
     static constexpr int DISPLAY_HEIGHT = 240;
     static constexpr int MARGIN_X = 16;
-    static constexpr int VU_Y = 32;
+    static constexpr int VU_BAR_HEIGHT = 22;
+    static constexpr int VU_BAR_SPACING = 32;
+    static constexpr int BOTTOM_MARGIN = 8;
+    static constexpr int VU_Y =
+        DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
     static constexpr int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
     static constexpr int VU_LABEL_WIDTH = 14;
     static constexpr int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
-    static constexpr int VU_BAR_HEIGHT = 22;
-    static constexpr int VU_BAR_SPACING = 32;
     static constexpr int VU_L_Y = VU_Y;
     static constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
     static constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
@@ -529,9 +553,218 @@ void VUMeter::process()
             decayIfDue();
         }
 
+        // Draw PS (centered) and RT (scrolling by characters) between title and VU meters
+        {
+            static uint32_t last_fetch_ms = 0;
+            static char ps[9] = {0};
+            static char rt_ui[1024] = {0};
+            if (now_ms - last_fetch_ms >= 500)
+            {
+                last_fetch_ms = now_ms;
+                RDSAssembler::getPS(ps);
+                // Snapshot the long-form UI RT (independent of RDS broadcast window)
+                strncpy(rt_ui, s_ui_rt_long, sizeof(rt_ui) - 1);
+                rt_ui[sizeof(rt_ui) - 1] = '\0';
+            }
+
+            // Layout region and font sizes
+            const int TEXT_AREA_X = MARGIN_X;
+            const int TEXT_AREA_W = VU_WIDTH;
+            const int CHAR_W = 6;
+            const int CHAR_H = 8;
+            const int PS_SIZE = 3;
+            const int RT_SIZE = 2;
+            const int PS_H = CHAR_H * PS_SIZE;
+            const int RT_H = CHAR_H * RT_SIZE;
+            const int TEXT_PS_Y = 56;
+            const int TEXT_RT_Y = TEXT_PS_Y + PS_H + 6;
+
+            // Draw PS centered (size 3); only if changed
+            gfx_->setTextSize(PS_SIZE);
+            gfx_->setTextColor(COLOR_WHITE);
+            int ps_len = (int)strlen(ps);
+            int ps_px = ps_len * CHAR_W * PS_SIZE;
+            int ps_x = TEXT_AREA_X + (TEXT_AREA_W - ps_px) / 2;
+            if (ps_x < TEXT_AREA_X)
+                ps_x = TEXT_AREA_X;
+            static char ps_prev[9] = {0};
+            if (strncmp(ps, ps_prev, 8) != 0)
+            {
+                gfx_->fillRect(TEXT_AREA_X, TEXT_PS_Y - 2, TEXT_AREA_W, PS_H + 4, COLOR_BLACK);
+                gfx_->setCursor(ps_x, TEXT_PS_Y);
+                gfx_->print(ps);
+                memcpy(ps_prev, ps, 8);
+                ps_prev[8] = '\0';
+            }
+
+            // Draw RT scrolling by characters (size 2)
+            gfx_->setTextSize(RT_SIZE);
+            static uint32_t last_scroll_ms = 0;
+            // Long-form marquee buffers (current + pending), plus display buffer
+            static char marquee_cur[1024] = {0};
+            static char marquee_pending[1024] = {0};
+            static bool has_pending = false;
+            static char rt_disp[256] = {0};
+            static int rt_off = 0;
+
+            // Build a long marquee only from RT (UI preferred, else broadcast 64c),
+            // flattening multi-line into one line with delimiter
+            auto build_marquee_from_rt = [](const char *in, char *out, size_t out_sz) {
+                if (!in || !out || out_sz == 0)
+                    return;
+                // Delimiter between pieces
+                const char *delim = " • ";
+                const size_t delim_len = strlen(delim);
+
+                // Temporary working buffer
+                char tmp[256];
+                size_t in_len = strnlen(in, sizeof(tmp) - 1);
+                memcpy(tmp, in, in_len);
+                tmp[in_len] = '\0';
+
+                // Normalize CR->\n and tabs->space
+                for (size_t i = 0; i < in_len; ++i)
+                {
+                    if (tmp[i] == '\r') tmp[i] = '\n';
+                    else if (tmp[i] == '\t') tmp[i] = ' ';
+                }
+
+                // Tokenize by \n and trim each piece, join with delimiter
+                size_t out_pos = 0;
+                const char *p = tmp;
+                bool first = true;
+                while (*p)
+                {
+                    // Extract line
+                    const char *line_start = p;
+                    const char *line_end = strchr(p, '\n');
+                    size_t line_len = line_end ? (size_t)(line_end - line_start)
+                                               : strlen(line_start);
+                    // Trim spaces
+                    while (line_len > 0 && (*line_start == ' '))
+                    {
+                        line_start++; line_len--;
+                    }
+                    while (line_len > 0 && (line_start[line_len - 1] == ' '))
+                        line_len--;
+
+                    if (line_len > 0)
+                    {
+                        // Add delimiter if not first
+                        if (!first)
+                        {
+                            if (out_pos + delim_len < out_sz - 1)
+                            {
+                                memcpy(out + out_pos, delim, delim_len);
+                                out_pos += delim_len;
+                            }
+                        }
+                        // Append token
+                        size_t to_copy = line_len;
+                        if (out_pos + to_copy >= out_sz - 1)
+                            to_copy = (out_sz - 1) - out_pos;
+                        memcpy(out + out_pos, line_start, to_copy);
+                        out_pos += to_copy;
+                        first = false;
+                    }
+
+                    p = line_end ? (line_end + 1) : (p + strlen(p));
+                }
+
+                // If empty, ensure out is zeroed; else add a gap at seam for smooth wrap
+                if (out_pos == 0)
+                {
+                    out[0] = '\0';
+                }
+                else
+                {
+                    const char gap[] = "      "; // 6 spaces
+                    size_t gap_len = sizeof(gap) - 1;
+                    if (out_pos + gap_len >= out_sz - 1)
+                        gap_len = (out_sz - 1) - out_pos;
+                    memcpy(out + out_pos, gap, gap_len);
+                    out_pos += gap_len;
+                    out[out_pos] = '\0';
+                }
+            };
+
+            // If new RT arrives, prepare a pending marquee from it (swap later at wrap)
+            // Use the long-form UI RT only (display is independent of broadcast length)
+            const char *src_pref = rt_ui;
+            static char last_src_seen[1024] = {0};
+            if (strncmp(src_pref, last_src_seen, sizeof(last_src_seen) - 1) != 0)
+            {
+                strncpy(last_src_seen, src_pref, sizeof(last_src_seen) - 1);
+                last_src_seen[sizeof(last_src_seen) - 1] = '\0';
+                char built[1024];
+                built[0] = '\0';
+                build_marquee_from_rt(last_src_seen, built, sizeof(built));
+                if (strncmp(built, marquee_cur, sizeof(built)) != 0)
+                {
+                    strncpy(marquee_pending, built, sizeof(marquee_pending) - 1);
+                    marquee_pending[sizeof(marquee_pending) - 1] = '\0';
+                    has_pending = true;
+                }
+            }
+
+            // Only update (clear + redraw) on scroll interval
+            const uint32_t scroll_interval_ms = 200; // slower, less flicker
+            if (now_ms - last_scroll_ms >= scroll_interval_ms)
+            {
+                last_scroll_ms = now_ms;
+
+                // Commit pending marquee immediately if nothing to show
+                if (marquee_cur[0] == '\0' && has_pending)
+                {
+                    strncpy(marquee_cur, marquee_pending, sizeof(marquee_cur) - 1);
+                    marquee_cur[sizeof(marquee_cur) - 1] = '\0';
+                    has_pending = false;
+                    rt_off = 0;
+                }
+
+                // Compute display capacity in characters
+                int cap_chars = TEXT_AREA_W / (CHAR_W * RT_SIZE);
+                if (cap_chars < 1)
+                    cap_chars = 1;
+                if (cap_chars >= (int)sizeof(rt_disp))
+                    cap_chars = (int)sizeof(rt_disp) - 1;
+
+                // If fits, just draw once; else rotate offset by 1 char
+                const size_t src_len = strnlen(marquee_cur, sizeof(marquee_cur) - 1);
+                if (src_len > 0)
+                {
+                    // Build substring starting at rt_off
+                    for (int i = 0; i < cap_chars; ++i)
+                    {
+                        rt_disp[i] = marquee_cur[(rt_off + i) % src_len];
+                    }
+                    rt_disp[cap_chars] = '\0';
+                    rt_off = (rt_off + 1) % (int)src_len;
+
+                    // On full wrap, swap in pending marquee if available
+                    if (rt_off == 0 && has_pending)
+                    {
+                        strncpy(marquee_cur, marquee_pending, sizeof(marquee_cur) - 1);
+                        marquee_cur[sizeof(marquee_cur) - 1] = '\0';
+                        has_pending = false;
+                        // rt_off already 0 at wrap; continue with new content next tick
+                    }
+                }
+                else
+                {
+                    rt_disp[0] = '\0';
+                }
+
+                // Clear RT line and draw new
+                gfx_->fillRect(TEXT_AREA_X, TEXT_RT_Y - 2, TEXT_AREA_W, RT_H + 4, COLOR_BLACK);
+                gfx_->setCursor(TEXT_AREA_X, TEXT_RT_Y);
+                gfx_->print(rt_disp);
+            }
+        }
+
         // Draw status panel
         VUStatsSnapshot stats;
-        if (stats_queue_ && xQueueReceive(stats_queue_, &stats, 0) == pdTRUE)
+        if (false && stats_queue_ && xQueueReceive(stats_queue_, &stats, 0) == pdTRUE)
         {
             const int panelY = DISPLAY_HEIGHT - Config::STATUS_PANEL_HEIGHT;
             gfx_->fillRect(0, panelY, DISPLAY_WIDTH, Config::STATUS_PANEL_HEIGHT, COLOR_BLACK);

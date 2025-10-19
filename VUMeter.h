@@ -332,7 +332,20 @@ class VUMeter : public ModuleBase
      *   true if snapshot was successfully enqueued
      *   false if queue was not initialized
      */
-    static bool enqueueStats(const VUStatsSnapshot &s);
+  static bool enqueueStats(const VUStatsSnapshot &s);
+
+    /**
+     * Set long-form RadioText for display marquee (UI only)
+     *
+     * The display can show an arbitrarily long concatenation of RT pieces
+     * (e.g., multiple lines joined with a delimiter). This UI string is not
+     * constrained by the 64-char RDS limit and is independent of what is
+     * currently being broadcast.
+     *
+     * Parameters:
+     *   rt_long: UTF-8 string to scroll on the display; nullptr clears it
+     */
+    static void setDisplayRT(const char *rt_long);
 
   private:
     /**

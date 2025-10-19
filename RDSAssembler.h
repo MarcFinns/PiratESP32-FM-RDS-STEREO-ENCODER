@@ -147,6 +147,18 @@ class RDSAssembler : public ModuleBase
     static void setRT(const char *rt);
 
     /**
+     * Get current Program Service (PS) 8-character name.
+     * Copies 8 chars and appends a null terminator into out[9].
+     */
+    static void getPS(char out[9]);
+
+    /**
+     * Get current RadioText (RT) string (up to 64 chars).
+     * Copies and null-terminates into out[65].
+     */
+    static void getRT(char out[65]);
+
+    /**
      * Set AF list (FM VHF, Method A). freqs_mhz: array of MHz (e.g., 101.1f).
      * Only 87.6-107.9 MHz are encoded (0.1 MHz step). Max 25 entries per spec.
      */
