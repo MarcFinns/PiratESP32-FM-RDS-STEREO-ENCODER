@@ -17,6 +17,9 @@
  * =====================================================================================
  */
 #include "RDSAssembler.h"
+#include "VUMeter.h"
+
+#include <cstring>
 #include "Log.h"
 
 #include <freertos/queue.h>
@@ -130,12 +133,31 @@ void RDSAssembler::setRT(const char *rt)
     RDSAssembler &rds = getInstance();
     if (!rt)
         return;
+    // Update display with full-length RT (UI-only, not limited to 64 chars)
+    VUMeter::setDisplayRT(rt);
     int i = 0;
     for (; i < 64 && rt[i] != '\0'; ++i)
         rds.rt_[i] = rt[i];
     for (; i < 64; ++i)
         rds.rt_[i] = ' ';
     rds.rt_ab_ = !rds.rt_ab_;
+}
+
+void RDSAssembler::getPS(char out[9])
+{
+    RDSAssembler &rds = getInstance();
+    for (int i = 0; i < 8; ++i)
+        out[i] = rds.ps_[i];
+    out[8] = '\0';
+}
+
+void RDSAssembler::getRT(char out[65])
+{
+    RDSAssembler &rds = getInstance();
+    int i = 0;
+    for (; i < 64; ++i)
+        out[i] = rds.rt_[i];
+    out[64] = '\0';
 }
 
 void RDSAssembler::setAF_FM(const float *freqs_mhz, size_t count)

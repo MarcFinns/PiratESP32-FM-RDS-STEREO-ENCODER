@@ -432,6 +432,12 @@ class DSP_pipeline
     // Used to suspend/resume/delete the task if needed
     TaskHandle_t task_handle_ = nullptr;
 
+    // ==================================================================================
+    //                          PILOT AUTO-MUTE STATE
+    // ==================================================================================
+    bool pilot_muted_ = false;                // Current mute state
+    uint64_t last_above_thresh_us_ = 0;       // Last time audio was above threshold
+
     /**
      * Task Trampoline (Static Entry Point)
      *

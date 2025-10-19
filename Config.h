@@ -178,7 +178,7 @@ constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
 
 /** ---- LOGGER TASK ---- */
 /** Logger: Core Assignment (0 or 1) */
-constexpr int LOGGER_CORE = 0; // Core selection for Logger task
+constexpr int LOGGER_CORE = 1; // Core selection for Logger task
 /** Logger: Task Priority */
 constexpr uint32_t LOGGER_PRIORITY = 2; // Medium priority
 /** Logger: Stack Size (32-bit words) */
@@ -198,7 +198,7 @@ constexpr std::size_t VU_QUEUE_LEN = 1; // Mailbox: holds only latest
 
 /** ---- RDS ASSEMBLER TASK ---- */
 /** RDS Assembler: Core Assignment (0 or 1) */
-constexpr int RDS_CORE = 0; // Core selection for RDS assembler
+constexpr int RDS_CORE = 1; // Core selection for RDS assembler
 /** RDS Assembler: Task Priority */
 constexpr uint32_t RDS_PRIORITY = 1; // Low priority
 /** RDS Assembler: Stack Size (32-bit words) */
@@ -208,7 +208,7 @@ constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024; // 1024 bits buffer
 
 /** ---- DSP PIPELINE TASK ---- */
 /** DSP Pipeline: Core Assignment (0 or 1) */
-constexpr int DSP_CORE = 1; // Core selection for DSP pipeline
+constexpr int DSP_CORE = 0; // Core selection for DSP pipeline
 /** DSP Pipeline: Task Priority */
 constexpr uint32_t DSP_PRIORITY = 6; // Highest priority
 /** DSP Pipeline: Stack Size (32-bit words) */
@@ -349,6 +349,28 @@ constexpr float PILOT_AMP = 0.09f;
 constexpr float DIFF_AMP = 0.9f;
 
 // ==================================================================================
+//                       PILOT AUTO-MUTE ON SILENCE
+// ==================================================================================
+/**
+ * Automatically mute 19 kHz pilot after sustained input silence.
+ *
+ * Purpose: When program audio is silent for a configurable duration, the pilot can
+ * be disabled to avoid stereo hiss on receivers. As soon as
+ * audio reappears above the threshold, the pilot is re-enabled immediately.
+ */
+constexpr bool PILOT_MUTE_ON_SILENCE = true;
+
+/**
+ * Silence detection threshold (RMS, linear). Default: 0.001 (~ -60 dBFS)
+ */
+constexpr float SILENCE_RMS_THRESHOLD = 0.002f;
+
+/**
+ * Hold time before muting pilot (milliseconds). Default: 3000 ms (3 seconds)
+ */
+constexpr uint32_t SILENCE_HOLD_MS = 2000u;
+
+// ==================================================================================
 //                          PERFORMANCE MONITORING
 // ==================================================================================
 
@@ -393,7 +415,7 @@ constexpr uint64_t LEVEL_TAPS_INTERVAL_US = 5000000ULL;
  *
  * Value: 5,000 microseconds (5 ms)
  */
-constexpr uint64_t VU_UPDATE_INTERVAL_US = 5000ULL;
+constexpr uint64_t VU_UPDATE_INTERVAL_US = 10000ULL;
 
 /**
  * dBFS Reference Level
@@ -968,7 +990,7 @@ constexpr uint16_t VU_PEAK_HOLD_MS = 1000;
  *
  * Value: 20 milliseconds
  */
-constexpr uint16_t VU_FRAME_INTERVAL_MS = 20;
+constexpr uint16_t VU_FRAME_INTERVAL_MS = 25;
 
 // ==================================================================================
 //                          VU METER dB SCALE RANGES

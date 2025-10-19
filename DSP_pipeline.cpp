@@ -154,6 +154,11 @@ bool DSP_pipeline::begin()
     // Initialize FreeRTOS task statistics monitoring (if enabled in menuconfig)
     TaskStats::init();
 
+    // Initialize pilot auto-mute state
+    last_above_thresh_us_ = esp_timer_get_time();
+    pilot_muted_ = false;
+    mpx_synth_.setPilotAmp(Config::PILOT_AMP);
+
     // Initialization complete, ready to process audio
     Log::enqueue(LogLevel::INFO, "System Ready - Starting Audio Processing");
 
@@ -538,6 +543,34 @@ void DSP_pipeline::process()
     // STAGE 6: FM Multiplex (MPX) Synthesis + RDS Injection
     // ============================================================================
     t0 = t1;
+
+    // Pilot auto-mute control (based on input silence)
+    if (Config::PILOT_MUTE_ON_SILENCE && Config::ENABLE_STEREO_PILOT_19K)
+    {
+        const float level = std::max(l_rms, r_rms);
+        const uint64_t now_us = esp_timer_get_time();
+        const uint64_t hold_us = static_cast<uint64_t>(Config::SILENCE_HOLD_MS) * 1000ULL;
+
+        if (level >= Config::SILENCE_RMS_THRESHOLD)
+        {
+            // Audio present: unmute immediately if muted
+            last_above_thresh_us_ = now_us;
+            if (pilot_muted_)
+            {
+                mpx_synth_.setPilotAmp(Config::PILOT_AMP);
+                pilot_muted_ = false;
+            }
+        }
+        else
+        {
+            // Below threshold: if held long enough, mute pilot
+            if (!pilot_muted_ && (now_us - last_above_thresh_us_) >= hold_us)
+            {
+                mpx_synth_.setPilotAmp(0.0f);
+                pilot_muted_ = true;
+            }
+        }
+    }
 
     // Generate phase-coherent carriers (19 kHz pilot, 38 kHz subcarrier, 57 kHz RDS)
     bool need19 = Config::ENABLE_STEREO_PILOT_19K;
