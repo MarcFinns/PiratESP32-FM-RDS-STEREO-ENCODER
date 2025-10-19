@@ -34,7 +34,7 @@
 #include "Log.h"
 #include "RDSSynth.h"
 #include "TaskStats.h"
-#include "VUMeter.h"
+#include "DisplayManager.h"
 
 #include <Arduino.h>
 #include <esp32-hal-cpu.h>
@@ -289,7 +289,7 @@ void DSP_pipeline::updateVUMeters(float l_peak, float r_peak, float l_rms, float
     vu.frames = static_cast<uint32_t>(frames_read);
     vu.ts_us = static_cast<uint32_t>(now_us & 0xFFFFFFFFu);
 
-    VUMeter::enqueue(vu);
+    DisplayManager::enqueue(vu);
 }
 
 /**
@@ -440,7 +440,7 @@ void DSP_pipeline::updatePerformanceMetrics(uint32_t total_us, std::size_t frame
                 snap.cpu_valid = 0;
             }
 
-            VUMeter::enqueueStats(snap);
+            DisplayManager::enqueueStats(snap);
         }
     }
 }

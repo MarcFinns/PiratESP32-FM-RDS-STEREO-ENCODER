@@ -54,7 +54,7 @@
 #include "Log.h"
 #include "RDSAssembler.h"
 #include "SystemContext.h"
-#include "VUMeter.h"
+#include "DisplayManager.h"
 
 // Optional: RDS helper/demo task (Core 1)
 static void rds_demo_task(void *arg)

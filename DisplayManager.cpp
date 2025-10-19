@@ -2,12 +2,12 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
- *                    VU Meter Display Implementation (ModuleBase)
+ *                          Display Manager (ModuleBase)
  *
  * =====================================================================================
  *
- * File:         VUMeter.cpp
- * Description:  Real-time VU meter visualization on ILI9341 TFT display
+* File:         DisplayManager.cpp
+* Description:  Display manager handling VU visualization and RT/PS UI on ILI9341
  *
  * Architecture:
  *   * Runs on separate FreeRTOS task (core 1) to avoid blocking audio pipeline
@@ -38,7 +38,7 @@
  * =====================================================================================
  */
 
-#include "VUMeter.h"
+#include "DisplayManager.h"
 
 #include "Config.h"
 #include "Log.h"
@@ -58,9 +58,9 @@
 //                          SINGLETON INSTANCE
 // ==================================================================================
 
-VUMeter &VUMeter::getInstance()
+DisplayManager &DisplayManager::getInstance()
 {
-    static VUMeter s_instance;
+static DisplayManager s_instance;
     return s_instance;
 }
 
@@ -68,10 +68,10 @@ VUMeter &VUMeter::getInstance()
 //                      UI Marquee Text (Long-form RT for Display)
 // ----------------------------------------------------------------------------------
 // Independent of the 64-char RDS RT, the UI can present a much longer RT string.
-// This buffer is set via VUMeter::setDisplayRT() and consumed by the process loop.
+// This buffer is set via DisplayManager::setDisplayRT() and consumed by the process loop.
 static char s_ui_rt_long[1024] = {0};
 
-void VUMeter::setDisplayRT(const char *rt_long)
+void DisplayManager::setDisplayRT(const char *rt_long)
 {
     if (!rt_long)
     {
@@ -86,7 +86,7 @@ void VUMeter::setDisplayRT(const char *rt_long)
 //                          CONSTRUCTOR & MEMBER INITIALIZATION
 // ==================================================================================
 
-VUMeter::VUMeter()
+DisplayManager::DisplayManager()
     : queue_(nullptr), stats_queue_(nullptr), queue_len_(1), core_id_(1), priority_(1),
       stack_words_(4096), sample_overflow_count_(0), stats_overflow_count_(0),
       sample_overflow_logged_(false)
@@ -98,9 +98,9 @@ VUMeter::VUMeter()
 //                          STATIC WRAPPER API
 // ==================================================================================
 
-bool VUMeter::startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len)
+bool DisplayManager::startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len)
 {
-    VUMeter &vu = getInstance();
+    DisplayManager &vu = getInstance();
     vu.queue_len_ = queue_len;
     if (vu.queue_len_ == 0)
         vu.queue_len_ = 1;
@@ -110,12 +110,12 @@ bool VUMeter::startTask(int core_id, uint32_t priority, uint32_t stack_words, si
 
     // Spawn display task via ModuleBase helper
     return vu.spawnTask("vu", (uint32_t)stack_words, (UBaseType_t)priority, core_id,
-                        VUMeter::taskTrampoline);
+                        DisplayManager::taskTrampoline);
 }
 
-void VUMeter::stopTask()
+void DisplayManager::stopTask()
 {
-    VUMeter &vu = getInstance();
+    DisplayManager &vu = getInstance();
     if (vu.isRunning())
     {
         TaskHandle_t handle = vu.getTaskHandle();
@@ -127,17 +127,17 @@ void VUMeter::stopTask()
     }
 }
 
-bool VUMeter::enqueue(const VUSample &s)
+bool DisplayManager::enqueue(const VUSample &s)
 {
     return getInstance().enqueueRaw(s);
 }
 
-bool VUMeter::enqueueFromISR(const VUSample &s, BaseType_t *pxHigherPriorityTaskWoken)
+bool DisplayManager::enqueueFromISR(const VUSample &s, BaseType_t *pxHigherPriorityTaskWoken)
 {
     return getInstance().enqueueFromISRRaw(s, pxHigherPriorityTaskWoken);
 }
 
-bool VUMeter::enqueueStats(const VUStatsSnapshot &s)
+bool DisplayManager::enqueueStats(const VUStatsSnapshot &s)
 {
     return getInstance().enqueueStatsRaw(s);
 }
@@ -146,12 +146,12 @@ bool VUMeter::enqueueStats(const VUStatsSnapshot &s)
 //                          MODULEBASE IMPLEMENTATION
 // ==================================================================================
 
-void VUMeter::taskTrampoline(void *arg)
+void DisplayManager::taskTrampoline(void *arg)
 {
     ModuleBase::defaultTaskTrampoline(arg);
 }
 
-bool VUMeter::begin()
+bool DisplayManager::begin()
 {
     // Create FreeRTOS queues
     queue_ = xQueueCreate((UBaseType_t)queue_len_, sizeof(VUSample));
@@ -159,14 +159,14 @@ bool VUMeter::begin()
 
     if (!queue_)
     {
-        ErrorHandler::logError(ErrorCode::INIT_QUEUE_FAILED, "VUMeter::begin",
+        ErrorHandler::logError(ErrorCode::INIT_QUEUE_FAILED, "DisplayManager::begin",
                                "sample queue creation failed");
         return false;
     }
 
     if (!stats_queue_)
     {
-        ErrorHandler::logError(ErrorCode::INIT_QUEUE_FAILED, "VUMeter::begin",
+        ErrorHandler::logError(ErrorCode::INIT_QUEUE_FAILED, "DisplayManager::begin",
                                "stats queue creation failed");
         vQueueDelete(queue_);
         queue_ = nullptr;
@@ -176,7 +176,7 @@ bool VUMeter::begin()
     // Initialize display (optional)
     if (Config::VU_DISPLAY_ENABLED)
     {
-        Log::enqueuef(LogLevel::INFO, "VUMeter running on Core %d", xPortGetCoreID());
+        Log::enqueuef(LogLevel::INFO, "DisplayManager running on Core %d", xPortGetCoreID());
         if (Config::TFT_BL >= 0)
         {
             pinMode((int)Config::TFT_BL, OUTPUT);
@@ -276,19 +276,19 @@ bool VUMeter::begin()
             };
 
             drawScale();
-            ErrorHandler::logInfo("VUMeter", "VU display initialized (ILI9341)");
+            ErrorHandler::logInfo("DisplayManager", "VU display initialized (ILI9341)");
         }
         else
         {
-            ErrorHandler::logWarning("VUMeter", "VU display init failed; falling back to ASCII");
+            ErrorHandler::logWarning("DisplayManager", "VU display init failed; falling back to ASCII");
         }
     }
 
-    ErrorHandler::logInfo("VUMeter", "Task initialized successfully");
+    ErrorHandler::logInfo("DisplayManager", "Task initialized successfully");
     return true;
 }
 
-void VUMeter::process()
+void DisplayManager::process()
 {
     // ==================================================================================
     //                      DISPLAY HARDWARE & LAYOUT
@@ -846,7 +846,7 @@ void VUMeter::process()
     }
 }
 
-void VUMeter::shutdown()
+void DisplayManager::shutdown()
 {
     if (queue_)
     {
@@ -874,11 +874,11 @@ void VUMeter::shutdown()
 //                          INSTANCE MESSAGE ENQUEUE METHODS
 // ==================================================================================
 
-bool VUMeter::enqueueRaw(const VUSample &s)
+bool DisplayManager::enqueueRaw(const VUSample &s)
 {
     if (!queue_)
     {
-        ErrorHandler::logError(ErrorCode::QUEUE_NOT_INITIALIZED, "VUMeter::enqueueRaw",
+        ErrorHandler::logError(ErrorCode::QUEUE_NOT_INITIALIZED, "DisplayManager::enqueueRaw",
                                "queue is null");
         return false;
     }
@@ -891,7 +891,7 @@ bool VUMeter::enqueueRaw(const VUSample &s)
         if (!sample_overflow_logged_)
         {
             sample_overflow_logged_ = true;
-            ErrorHandler::logWarning("VUMeter::enqueueRaw",
+            ErrorHandler::logWarning("DisplayManager::enqueueRaw",
                                      "sample queue overflow (overwrite mode)");
         }
         return true;
@@ -904,7 +904,7 @@ bool VUMeter::enqueueRaw(const VUSample &s)
         if (!sample_overflow_logged_)
         {
             sample_overflow_logged_ = true;
-            ErrorHandler::logError(ErrorCode::QUEUE_FULL, "VUMeter::enqueueRaw",
+            ErrorHandler::logError(ErrorCode::QUEUE_FULL, "DisplayManager::enqueueRaw",
                                    "sample queue full, sample dropped");
         }
         return false;
@@ -913,7 +913,7 @@ bool VUMeter::enqueueRaw(const VUSample &s)
     return true;
 }
 
-bool VUMeter::enqueueFromISRRaw(const VUSample &s, BaseType_t *pxHigherPriorityTaskWoken)
+bool DisplayManager::enqueueFromISRRaw(const VUSample &s, BaseType_t *pxHigherPriorityTaskWoken)
 {
     if (!queue_)
     {
@@ -936,11 +936,11 @@ bool VUMeter::enqueueFromISRRaw(const VUSample &s, BaseType_t *pxHigherPriorityT
     return true;
 }
 
-bool VUMeter::enqueueStatsRaw(const VUStatsSnapshot &s)
+bool DisplayManager::enqueueStatsRaw(const VUStatsSnapshot &s)
 {
     if (!stats_queue_)
     {
-        ErrorHandler::logError(ErrorCode::QUEUE_NOT_INITIALIZED, "VUMeter::enqueueStatsRaw",
+        ErrorHandler::logError(ErrorCode::QUEUE_NOT_INITIALIZED, "DisplayManager::enqueueStatsRaw",
                                "stats queue is null");
         return false;
     }
@@ -958,7 +958,7 @@ bool VUMeter::enqueueStatsRaw(const VUStatsSnapshot &s)
         // Log stats overflow less frequently (not every time to prevent spam)
         if (stats_overflow_count_ == 1 || (stats_overflow_count_ % 100 == 0))
         {
-            ErrorHandler::logWarning("VUMeter::enqueueStatsRaw",
+            ErrorHandler::logWarning("DisplayManager::enqueueStatsRaw",
                                      "stats queue full, snapshot dropped");
         }
         return false;
