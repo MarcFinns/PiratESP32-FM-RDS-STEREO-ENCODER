@@ -17,7 +17,7 @@
  * =====================================================================================
  */
 #include "RDSAssembler.h"
-#include "VUMeter.h"
+#include "DisplayManager.h"
 
 #include <cstring>
 #include "Log.h"
@@ -134,7 +134,7 @@ void RDSAssembler::setRT(const char *rt)
     if (!rt)
         return;
     // Update display with full-length RT (UI-only, not limited to 64 chars)
-    VUMeter::setDisplayRT(rt);
+    DisplayManager::setDisplayRT(rt);
     int i = 0;
     for (; i < 64 && rt[i] != '\0'; ++i)
         rds.rt_[i] = rt[i];

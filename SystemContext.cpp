@@ -22,7 +22,7 @@
 #include "IHardwareDriver.h"
 #include "Log.h"
 #include "RDSAssembler.h"
-#include "VUMeter.h"
+#include "DisplayManager.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -180,17 +180,17 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
 
     // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging
-    if (!VUMeter::startTask(Config::VU_CORE,         // core_id
-                            Config::VU_PRIORITY,     // priority
-                            Config::VU_STACK_WORDS,  // stack_words
-                            Config::VU_QUEUE_LEN))   // queue_len (mailbox)
+    if (!DisplayManager::startTask(Config::VU_CORE,         // core_id
+                                   Config::VU_PRIORITY,     // priority
+                                   Config::VU_STACK_WORDS,  // stack_words
+                                   Config::VU_QUEUE_LEN))   // queue_len (mailbox)
     {
-        Log::enqueuef(LogLevel::WARN, "Failed to start VUMeter task (non-critical)");
+        Log::enqueuef(LogLevel::WARN, "Failed to start DisplayManager task (non-critical)");
         // Non-critical failure - continue initialization
     }
     else
     {
-        Log::enqueuef(LogLevel::INFO, "VU Meter task started on Core %d", Config::VU_CORE);
+        Log::enqueuef(LogLevel::INFO, "Display Manager task started on Core %d", Config::VU_CORE);
     }
 
     // ---- Step 4: Start RDS Assembler Task (Core 1) if Enabled ----
@@ -287,8 +287,8 @@ void SystemContext::shutdown()
     Log::enqueuef(LogLevel::INFO, "RDS Assembler stopped");
 
     // ---- Step 3: Stop VU Meter (Core 1) ----
-    VUMeter::stopTask();
-    Log::enqueuef(LogLevel::INFO, "VU Meter stopped");
+    DisplayManager::stopTask();
+    Log::enqueuef(LogLevel::INFO, "Display Manager stopped");
 
     // ---- Step 4: Stop Logger (Core 1) - Last ----
     Log::enqueuef(LogLevel::INFO, "SystemContext shutdown complete");

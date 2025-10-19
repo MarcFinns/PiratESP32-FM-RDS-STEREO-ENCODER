@@ -2,12 +2,12 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
- *                       VU Meter Display Module (ModuleBase)
+ *                       Display Manager (ModuleBase)
  *
  * =====================================================================================
  *
- * File:         VUMeter.h
- * Description:  Professional VU meter visualization module inheriting from ModuleBase
+ * File:         DisplayManager.h
+ * Description:  Display manager module handling VU visualization and UI text
  *
  * Purpose:
  *   This module provides a clean interface for displaying real-time audio levels
@@ -193,7 +193,7 @@ struct VUStatsSnapshot
  * Backward Compatibility:
  *   Static wrapper methods maintain compatibility with original namespace-based API.
  */
-class VUMeter : public ModuleBase
+class DisplayManager : public ModuleBase
 {
   public:
     /**
@@ -204,7 +204,7 @@ class VUMeter : public ModuleBase
      * Returns:
      *   Reference to the singleton VUMeter instance
      */
-    static VUMeter &getInstance();
+    static DisplayManager &getInstance();
 
     /**
      * Start VU Meter Task
@@ -332,7 +332,7 @@ class VUMeter : public ModuleBase
      *   true if snapshot was successfully enqueued
      *   false if queue was not initialized
      */
-  static bool enqueueStats(const VUStatsSnapshot &s);
+    static bool enqueueStats(const VUStatsSnapshot &s);
 
     /**
      * Set long-form RadioText for display marquee (UI only)
@@ -353,12 +353,12 @@ class VUMeter : public ModuleBase
      *
      * Initializes module state. Only called by getInstance().
      */
-    VUMeter();
+    DisplayManager();
 
     /**
      * Virtual Destructor Implementation
      */
-    virtual ~VUMeter() = default;
+    virtual ~DisplayManager() = default;
 
     /**
      * Initialize Module Resources (ModuleBase contract)
@@ -435,7 +435,10 @@ class VUMeter : public ModuleBase
 };
 
 // Backward compatibility aliases for old namespace-based API
-namespace VUMeter_NS
+// Backward compatibility aliases
+using VUMeter = DisplayManager;
+
+namespace DisplayManager_NS
 {
 // Legacy type names - map to new structs
 using Sample = VUSample;
@@ -444,29 +447,29 @@ using StatsSnapshot = VUStatsSnapshot;
 // Delegate to class static methods
 inline bool startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len = 1)
 {
-    return VUMeter::startTask(core_id, priority, stack_words, queue_len);
+    return DisplayManager::startTask(core_id, priority, stack_words, queue_len);
 }
 
 inline void stopTask()
 {
-    VUMeter::stopTask();
+    DisplayManager::stopTask();
 }
 
 inline bool enqueue(const Sample &s)
 {
-    return VUMeter::enqueue(s);
+    return DisplayManager::enqueue(s);
 }
 
 inline bool enqueueFromISR(const Sample &s, BaseType_t *pxHigherPriorityTaskWoken)
 {
-    return VUMeter::enqueueFromISR(s, pxHigherPriorityTaskWoken);
+    return DisplayManager::enqueueFromISR(s, pxHigherPriorityTaskWoken);
 }
 
 inline bool enqueueStats(const StatsSnapshot &s)
 {
-    return VUMeter::enqueueStats(s);
+    return DisplayManager::enqueueStats(s);
 }
-} // namespace VUMeter_NS
+} // namespace DisplayManager_NS
 
 // =====================================================================================
 //                                END OF FILE
