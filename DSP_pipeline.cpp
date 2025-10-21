@@ -88,6 +88,10 @@ static volatile bool s_pilot_enable = Config::ENABLE_STEREO_PILOT_19K;
 static volatile float s_pilot_thresh = Config::SILENCE_RMS_THRESHOLD;
 static volatile uint32_t s_pilot_hold_ms = Config::SILENCE_HOLD_MS;
 
+// Shadow flag to expose pilot mute state to other modules without requiring
+// direct access to the DSP_pipeline instance. Updated in process().
+bool g_dsp_pilot_muted_shadow = false;
+
 void DSP_pipeline::setStereoEnable(bool en) { s_stereo_enable = en; }
 bool DSP_pipeline::getStereoEnable() { return s_stereo_enable; }
 void DSP_pipeline::setRdsEnable(bool en) { s_rds_enable = en; }
@@ -102,6 +106,17 @@ void DSP_pipeline::setPilotHold(uint32_t ms) { s_pilot_hold_ms = ms; }
 uint32_t DSP_pipeline::getPilotHold() { return s_pilot_hold_ms; }
 void DSP_pipeline::setPilotEnable(bool en) { s_pilot_enable = en; }
 bool DSP_pipeline::getPilotEnable() { return s_pilot_enable; }
+
+bool DSP_pipeline::getPilotActive()
+{
+    // Active if user-enabled and not currently auto-muted due to silence.
+    // pilot_muted_ is an instance member; access via singleton instance.
+    // The audio task manages a single DSP_pipeline instance.
+    // Find the running instance via the FreeRTOS task handle stored in ModuleBase.
+    // Simpler approach: static shadow of last-known mute state updated in process.
+    extern bool g_dsp_pilot_muted_shadow; // forward from below
+    return s_pilot_enable && !g_dsp_pilot_muted_shadow;
+}
 
 // ==================================================================================
 //                          INITIALIZATION (begin)
@@ -607,6 +622,7 @@ void DSP_pipeline::process()
     {
         float desired_amp = (s_pilot_enable && !pilot_muted_) ? Config::PILOT_AMP : 0.0f;
         mpx_synth_.setPilotAmp(desired_amp);
+        g_dsp_pilot_muted_shadow = pilot_muted_;
     }
     // Mix mono + pilot + stereo subcarrier
     mpx_synth_.process(mono_buffer_, diff_buffer_, pilot_buffer_, subcarrier_buffer_, mpx_buffer_,

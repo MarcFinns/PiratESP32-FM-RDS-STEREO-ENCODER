@@ -78,6 +78,25 @@ constexpr int SPLASH_TOP_Y = 70;
  * Width is assumed to be 320 px.
  */
 constexpr int SPLASH_HEIGHT = 133;
+
+// ==================================================================================
+//                              UI COLOR PALETTE (RGB565)
+// ==================================================================================
+/**
+ * UI color palette for the on-device display (ILI9341 - RGB565).
+ * Adjust to taste or theme; values are 16-bit RGB565.
+ */
+namespace UI
+{
+constexpr uint16_t COLOR_BG     = 0x0000; // Black
+constexpr uint16_t COLOR_TEXT   = 0xFFFF; // White
+constexpr uint16_t COLOR_DIM    = 0x7BEF; // Mid gray
+constexpr uint16_t COLOR_ACCENT = 0xFD20; // Amber/Orange accent
+constexpr uint16_t COLOR_GOOD   = 0x07E0; // Green
+constexpr uint16_t COLOR_WARN   = 0xFD20; // Amber/Orange
+constexpr uint16_t COLOR_MUTED  = 0x4208; // Dark gray
+} // namespace UI
+
 // ==================================================================================
 //                              GPIO PIN ASSIGNMENTS
 // ==================================================================================
@@ -546,6 +565,14 @@ constexpr float VU_DB_OFFSET = 0.0f;
  * Value: true (peak mode)
  */
 constexpr bool VU_USE_PEAK_FOR_BAR = true;
+
+/**
+ * Display RDS Status Bar
+ *
+ * When true, shows a compact one-line bar with PI, PTY and flags (ST/RDS/PIL/TP/TA/MS).
+ * Disable if you experience instability with your display driver.
+ */
+constexpr bool DISPLAY_SHOW_RDS_STATUS_BAR = true;
 
 // ==================================================================================
 //                          ON-SCREEN STATUS PANEL

@@ -138,6 +138,10 @@ class DSP_pipeline
     static uint32_t getPilotHold();
     static void setPilotEnable(bool en);
     static bool getPilotEnable();
+    /**
+     * Returns true if the pilot is currently being transmitted (enabled and not auto-muted).
+     */
+    static bool getPilotActive();
 
     // ==================================================================================
     //                          PUBLIC INTERFACE

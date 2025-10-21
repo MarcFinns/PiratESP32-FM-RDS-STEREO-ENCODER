@@ -120,7 +120,6 @@ void setup()
 
             // ---- Overlay Text ----
             gfx->setTextWrap(false);
-            gfx->setTextColor(0xFFFF); // white
 
             auto centerX = [](const char *s, int size) -> int
             {
@@ -130,11 +129,17 @@ void setup()
             };
 
             // Title
-            const char *title = "PiratESP";
+            const char *title = "PiratESP32";
             int title_size = 3;
             int title_y = 10;
             gfx->setTextSize(title_size);
-            gfx->setCursor(centerX(title, title_size), title_y);
+            // Title drop shadow + accent for better contrast over B/W image
+            int title_x = centerX(title, title_size);
+            gfx->setTextColor(Config::UI::COLOR_MUTED);
+            gfx->setCursor(title_x + 1, title_y + 1);
+            gfx->print(title);
+            gfx->setTextColor(Config::UI::COLOR_ACCENT);
+            gfx->setCursor(title_x, title_y);
             gfx->print(title);
 
             // Subtitle one line under
@@ -143,7 +148,13 @@ void setup()
             // Place roughly one line below title: 8 px base * title_size + small gap
             int sub_y = title_y + (8 * title_size) + 10;
             gfx->setTextSize(sub_size);
-            gfx->setCursor(centerX(subtitle, sub_size), sub_y);
+            int sub_x = centerX(subtitle, sub_size);
+            // Subtle shadow, main in accent or bright text depending on taste
+            gfx->setTextColor(Config::UI::COLOR_MUTED);
+            gfx->setCursor(sub_x + 1, sub_y + 1);
+            gfx->print(subtitle);
+            gfx->setTextColor(Config::UI::COLOR_TEXT);
+            gfx->setCursor(sub_x, sub_y);
             gfx->print(subtitle);
 
             // Footer: build date/time and copyright at around y=200
@@ -154,9 +165,13 @@ void setup()
             int foot_size = 1;
             int foot_y = 215;
             gfx->setTextSize(foot_size);
-            gfx->setCursor(centerX(build_line, foot_size), foot_y);
+            // Footer in dim text for a softer look
+            gfx->setTextColor(Config::UI::COLOR_DIM);
+            int build_x = centerX(build_line, foot_size);
+            gfx->setCursor(build_x, foot_y);
             gfx->print(build_line);
-            gfx->setCursor(centerX(copy_line, foot_size), foot_y + 12);
+            int copy_x = centerX(copy_line, foot_size);
+            gfx->setCursor(copy_x, foot_y + 12);
             gfx->print(copy_line);
             delay(7000);
         }

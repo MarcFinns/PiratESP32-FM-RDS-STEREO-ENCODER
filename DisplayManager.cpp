@@ -6,8 +6,8 @@
  *
  * =====================================================================================
  *
-* File:         DisplayManager.cpp
-* Description:  Display manager handling VU visualization and RT/PS UI on ILI9341
+ * File:         DisplayManager.cpp
+ * Description:  Display manager handling VU visualization and RT/PS UI on ILI9341
  *
  * Architecture:
  *   * Runs on separate FreeRTOS task (core 1) to avoid blocking audio pipeline
@@ -42,6 +42,7 @@
 
 #include "Config.h"
 #include "Console.h"
+#include "DSP_pipeline.h"
 #include "RDSAssembler.h"
 
 #include <Arduino.h>
@@ -60,7 +61,7 @@
 
 DisplayManager &DisplayManager::getInstance()
 {
-static DisplayManager s_instance;
+    static DisplayManager s_instance;
     return s_instance;
 }
 
@@ -98,7 +99,8 @@ DisplayManager::DisplayManager()
 //                          STATIC WRAPPER API
 // ==================================================================================
 
-bool DisplayManager::startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len)
+bool DisplayManager::startTask(int core_id, uint32_t priority, uint32_t stack_words,
+                               size_t queue_len)
 {
     DisplayManager &vu = getInstance();
     vu.queue_len_ = queue_len;
@@ -190,7 +192,7 @@ bool DisplayManager::begin()
 
         if (gfx_ && gfx_->begin())
         {
-            gfx_->fillScreen(0x0000);
+            gfx_->fillScreen(Config::UI::COLOR_BG);
             gfx_->setTextWrap(false);
             gfx_->setTextColor(0xFFFF);
             // Removed top static title line; splash screen now provides branding
@@ -274,11 +276,20 @@ bool DisplayManager::begin()
             };
 
             drawScale();
+            // Static accent dividers (match layout constants used in process())
+            {
+                const int DISPLAY_WIDTH = 320;
+                const int MARGIN_X = 16;
+                const int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
+                gfx_->drawFastHLine(MARGIN_X, 50, VU_WIDTH, Config::UI::COLOR_ACCENT);  // under PS
+                gfx_->drawFastHLine(MARGIN_X, 138, VU_WIDTH, Config::UI::COLOR_ACCENT); // above VU
+            }
             ErrorHandler::logInfo("DisplayManager", "VU display initialized (ILI9341)");
         }
         else
         {
-            ErrorHandler::logWarning("DisplayManager", "VU display init failed; falling back to ASCII");
+            ErrorHandler::logWarning("DisplayManager",
+                                     "VU display init failed; falling back to ASCII");
         }
     }
 
@@ -546,6 +557,148 @@ void DisplayManager::process()
         if ((int32_t)(now_ms - last_frame_ms) >= (int32_t)FRAME_INTERVAL_MS)
         {
             last_frame_ms = now_ms;
+            // ---- RDS Status Bar (small text) ----
+            if (Config::DISPLAY_SHOW_RDS_STATUS_BAR)
+            {
+                static uint32_t last_rds_ms = 0;
+                static char last_line[64] = {0};
+                if (now_ms - last_rds_ms >= 500)
+                {
+                    last_rds_ms = now_ms;
+                    // Delay first status draw slightly to allow initial frame to settle
+                    static uint32_t boot_ms0 = 0;
+                    if (boot_ms0 == 0)
+                        boot_ms0 = millis();
+                    if ((now_ms - boot_ms0) < 1500)
+                    {
+                        strncpy(last_line, "", sizeof(last_line));
+                        // Skip drawing until ready
+                    }
+                    else
+                    {
+                        // Build status string: PI, PTY short, flags
+                        uint16_t pi = RDSAssembler::getPI();
+                        uint8_t pty = RDSAssembler::getPTY();
+                        bool tp = RDSAssembler::getTP();
+                        bool ta = RDSAssembler::getTA();
+                        bool ms = RDSAssembler::getMS();
+                        bool st = DSP_pipeline::getStereoEnable();
+                        bool rds = DSP_pipeline::getRdsEnable();
+                        bool pil = DSP_pipeline::getPilotActive();
+
+                        auto pty_name = [](uint8_t code) -> const char *
+                        {
+                            switch (code)
+                            {
+                            case 0:
+                                return "NONE";
+                            case 1:
+                                return "NEWS";
+                            case 2:
+                                return "INFO";
+                            case 3:
+                                return "SPORT";
+                            case 4:
+                                return "TALK";
+                            case 5:
+                                return "ROCK";
+                            case 6:
+                                return "CROCK"; // classic rock
+                            case 7:
+                                return "HITS";
+                            case 8:
+                                return "SROCK"; // soft rock
+                            case 10:
+                                return "TOP40";
+                            case 11:
+                                return "CNTRY";
+                            case 13:
+                                return "OLDIES";
+                            case 14:
+                                return "SOFT";
+                            case 15:
+                                return "JAZZ";
+                            case 16:
+                                return "CLASS";
+                            case 17:
+                                return "RNB";
+                            case 18:
+                                return "SRNB"; // soft rnb
+                            case 19:
+                                return "LANG";
+                            case 20:
+                                return "RELM";
+                            case 21:
+                                return "RELT";
+                            case 22:
+                                return "PERS";
+                            case 24:
+                                return "PUBLIC";
+                            case 27:
+                                return "COLL";
+                            default:
+                                return "UNK";
+                            }
+                        };
+
+                        char line[64];
+                        // Include flag states so we detect changes and redraw
+                        snprintf(line, sizeof(line),
+                                 "PI=%04X PTY=%s ST=%u RDS=%u PIL=%u TP=%u TA=%u MS=%u",
+                                 (unsigned)pi, pty_name(pty), st ? 1u : 0u, rds ? 1u : 0u,
+                                 pil ? 1u : 0u, tp ? 1u : 0u, ta ? 1u : 0u, ms ? 1u : 0u);
+
+                        if (strncmp(line, last_line, sizeof(last_line)) != 0)
+                        {
+                            // Clear bar region and print tokens with per-flag color
+                            const int STATUS_Y = 28; // small area above PS
+                            const int STATUS_H = 12; // roughly one text line
+                            gfx_->fillRect(MARGIN_X, STATUS_Y - 2, VU_WIDTH, STATUS_H + 4,
+                                           COLOR_BLACK);
+                            gfx_->setTextSize(1);
+                            gfx_->setTextWrap(false);
+
+                            auto printToken = [&](const char *txt, uint16_t color)
+                            {
+                                gfx_->setTextColor(color);
+                                gfx_->print(txt);
+                            };
+
+                            // Left: PI and PTY
+                            gfx_->setCursor(MARGIN_X, STATUS_Y);
+                            char buf[24];
+                            snprintf(buf, sizeof(buf), "PI %04X  ", (unsigned)pi);
+                            printToken(buf, Config::UI::COLOR_TEXT);
+                            snprintf(buf, sizeof(buf), "PTY %s  ", pty_name(pty));
+                            printToken(buf, Config::UI::COLOR_TEXT);
+
+                            // Status chips: ST RDS PIL | TP TA MS
+                            auto chip = [&](const char *lbl, bool on, uint16_t on_col)
+                            {
+                                // small dot
+                                int16_t x = gfx_->getCursorX();
+                                int16_t y = gfx_->getCursorY();
+                                uint16_t col = on ? on_col : Config::UI::COLOR_MUTED;
+                                gfx_->fillRect(x, y + 2, 6, 6, col);
+                                gfx_->setCursor(x + 8, y);
+                                printToken(lbl,
+                                           on ? Config::UI::COLOR_TEXT : Config::UI::COLOR_DIM);
+                                gfx_->setCursor(gfx_->getCursorX() + 6, y); // gap
+                            };
+
+                            chip("ST", st, Config::UI::COLOR_GOOD);
+                            chip("RDS", rds, Config::UI::COLOR_GOOD);
+                            chip("PIL", pil, Config::UI::COLOR_GOOD);
+                            chip("TP", tp, Config::UI::COLOR_GOOD);
+                            chip("TA", ta, ta ? Config::UI::COLOR_WARN : Config::UI::COLOR_GOOD);
+                            chip("MS", ms, Config::UI::COLOR_GOOD);
+
+                            strncpy(last_line, line, sizeof(last_line) - 1);
+                            last_line[sizeof(last_line) - 1] = '\0';
+                        }
+                    }
+                }
+            }
             updateBar(chL, prevLenL, prevPeakL);
             updateBar(chR, prevLenR, prevPeakR);
             decayIfDue();
@@ -575,28 +728,27 @@ void DisplayManager::process()
             const int RT_SIZE = 2;
             const int PS_H = CHAR_H * PS_SIZE;
             const int RT_H = CHAR_H * RT_SIZE;
-            const int TEXT_PS_Y = 56;
+            const int TEXT_PS_Y = 70;
             const int TEXT_RT_Y = TEXT_PS_Y + PS_H + 6;
 
             // Draw PS centered (size 3); only if changed
             gfx_->setTextSize(PS_SIZE);
-            gfx_->setTextColor(COLOR_WHITE);
 
             // Create trimmed version: copy PS and remove trailing spaces
             char ps_trimmed[9];
-            memset(ps_trimmed, 0, sizeof(ps_trimmed));  // Clear entire buffer
+            memset(ps_trimmed, 0, sizeof(ps_trimmed)); // Clear entire buffer
             strncpy(ps_trimmed, ps, 8);
             // Trim from the end: find last non-space character
             for (int i = 7; i >= 0; --i)
             {
                 if (ps_trimmed[i] != ' ')
                 {
-                    ps_trimmed[i + 1] = '\0';  // Null-terminate after last non-space
+                    ps_trimmed[i + 1] = '\0'; // Null-terminate after last non-space
                     break;
                 }
                 if (i == 0)
                 {
-                    ps_trimmed[0] = '\0';  // All spaces case
+                    ps_trimmed[0] = '\0'; // All spaces case
                 }
             }
 
@@ -613,9 +765,14 @@ void DisplayManager::process()
             if (strncmp(ps, ps_prev, 8) != 0)
             {
                 // Clear entire PS area completely
-                gfx_->fillRect(TEXT_AREA_X, TEXT_PS_Y - 2, TEXT_AREA_W, PS_H + 4, COLOR_BLACK);
+                gfx_->fillRect(TEXT_AREA_X, TEXT_PS_Y - 2, TEXT_AREA_W, PS_H + 4,
+                               Config::UI::COLOR_BG);
 
-                // Draw trimmed PS centered
+                // Draw trimmed PS centered with drop shadow and accent
+                gfx_->setTextColor(Config::UI::COLOR_MUTED);
+                gfx_->setCursor(ps_x + 1, TEXT_PS_Y + 1);
+                gfx_->print(ps_trimmed);
+                gfx_->setTextColor(Config::UI::COLOR_ACCENT);
                 gfx_->setCursor(ps_x, TEXT_PS_Y);
                 gfx_->print(ps_trimmed);
 
@@ -623,6 +780,7 @@ void DisplayManager::process()
                 memcpy(ps_prev, ps, 8);
                 ps_prev[8] = '\0';
             }
+            // PTY pill removed per request (avoid duplication next to PS)
 
             // Draw RT scrolling by characters (size 2)
             gfx_->setTextSize(RT_SIZE);
@@ -638,7 +796,8 @@ void DisplayManager::process()
             // recompute when the set of RT items changes (ADD/DEL/CLEAR). If the list
             // is empty, fall back to the current broadcast RT (64 chars) so encoder
             // display roughly matches receivers.
-            auto sanitize_ascii = [](const char *in, char *out, size_t out_sz) {
+            auto sanitize_ascii = [](const char *in, char *out, size_t out_sz)
+            {
                 size_t pos = 0;
                 for (const char *p = in; *p && pos < out_sz - 1; ++p)
                 {
@@ -656,7 +815,8 @@ void DisplayManager::process()
                 out[pos] = '\0';
             };
 
-            auto build_marquee_from_rtlist = [&](char *out, size_t out_sz) {
+            auto build_marquee_from_rtlist = [&](char *out, size_t out_sz)
+            {
                 out[0] = '\0';
                 size_t out_pos = 0;
                 const char *delim = " - "; // ASCII-safe delimiter for display
@@ -666,7 +826,7 @@ void DisplayManager::process()
                 if (n == 0)
                 {
                     // Fallback: use current broadcast RT window
-                    char rt64[65];
+                    static char rt64[65];
                     RDSAssembler::getRT(rt64);
                     // Trim trailing spaces
                     for (int i = 63; i >= 0; --i)
@@ -676,10 +836,11 @@ void DisplayManager::process()
                         else
                             break;
                     }
-                    char clean[256];
+                    static char clean[256];
                     sanitize_ascii(rt64, clean, sizeof(clean));
                     size_t len = strnlen(clean, sizeof(clean) - 1);
-                    if (len > out_sz - 1) len = out_sz - 1;
+                    if (len > out_sz - 1)
+                        len = out_sz - 1;
                     memcpy(out, clean, len);
                     out[len] = '\0';
                 }
@@ -688,16 +849,21 @@ void DisplayManager::process()
                     bool first = true;
                     for (std::size_t i = 0; i < n; ++i)
                     {
-                        char item[256];
+                        static char item[256];
                         if (!RDSAssembler::rtListGet(i, item, sizeof(item)))
                             continue;
-                        char clean[256];
+                        static char clean[256];
                         sanitize_ascii(item, clean, sizeof(clean));
                         // Trim spaces at both ends
                         const char *s = clean;
-                        while (*s == ' ') ++s;
+                        while (*s == ' ')
+                            ++s;
                         size_t sl = strlen(s);
-                        while (sl > 0 && s[sl - 1] == ' ') { ((char *)s)[sl - 1] = '\0'; --sl; }
+                        while (sl > 0 && s[sl - 1] == ' ')
+                        {
+                            ((char *)s)[sl - 1] = '\0';
+                            --sl;
+                        }
                         if (sl == 0)
                             continue;
                         if (!first)
@@ -739,7 +905,7 @@ void DisplayManager::process()
 
             // Track changes in the RT list or fallback RT text using a signature string
             static char last_sig[1024] = {0};
-            char sig[1024];
+            static char sig[1024];
             sig[0] = '\0';
             {
                 std::size_t n = RDSAssembler::rtListCount();
@@ -747,7 +913,8 @@ void DisplayManager::process()
                 {
                     char rt64[65];
                     RDSAssembler::getRT(rt64);
-                    // Use the RT value as signature when list is empty (so we refresh on RT changes)
+                    // Use the RT value as signature when list is empty (so we refresh on RT
+                    // changes)
                     strncpy(sig, rt64, sizeof(sig) - 1);
                     sig[sizeof(sig) - 1] = '\0';
                 }
@@ -759,7 +926,8 @@ void DisplayManager::process()
                         char item[256];
                         if (RDSAssembler::rtListGet(i, item, sizeof(item)))
                         {
-                            if (!first) strncat(sig, "|", sizeof(sig) - strlen(sig) - 1);
+                            if (!first)
+                                strncat(sig, "|", sizeof(sig) - strlen(sig) - 1);
                             strncat(sig, item, sizeof(sig) - strlen(sig) - 1);
                             first = false;
                         }
@@ -771,10 +939,10 @@ void DisplayManager::process()
             {
                 strncpy(last_sig, sig, sizeof(last_sig) - 1);
                 last_sig[sizeof(last_sig) - 1] = '\0';
-                char built[1024];
+                static char built[1024];
                 built[0] = '\0';
                 build_marquee_from_rtlist(built, sizeof(built));
-                if (strncmp(built, marquee_cur, sizeof(built)) != 0)
+                if (strncmp(built, marquee_cur, sizeof(marquee_cur)) != 0)
                 {
                     strncpy(marquee_pending, built, sizeof(marquee_pending) - 1);
                     marquee_pending[sizeof(marquee_pending) - 1] = '\0';
@@ -830,10 +998,20 @@ void DisplayManager::process()
                     rt_disp[0] = '\0';
                 }
 
-                // Clear RT line and draw new
-                gfx_->fillRect(TEXT_AREA_X, TEXT_RT_Y - 2, TEXT_AREA_W, RT_H + 4, COLOR_BLACK);
-                gfx_->setCursor(TEXT_AREA_X, TEXT_RT_Y);
-                gfx_->print(rt_disp);
+                // Clear RT line and draw new (dim text, accent separators)
+                gfx_->fillRect(TEXT_AREA_X, TEXT_RT_Y - 2, TEXT_AREA_W, RT_H + 4,
+                               Config::UI::COLOR_BG);
+                int cursor_x = TEXT_AREA_X;
+                gfx_->setCursor(cursor_x, TEXT_RT_Y);
+                for (int i = 0; rt_disp[i]; ++i)
+                {
+                    char c = rt_disp[i];
+                    if (c == '-')
+                        gfx_->setTextColor(Config::UI::COLOR_ACCENT);
+                    else
+                        gfx_->setTextColor(Config::UI::COLOR_DIM);
+                    gfx_->print(c);
+                }
             }
         }
 
