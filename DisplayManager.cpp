@@ -886,19 +886,29 @@ void DisplayManager::process()
                     out[out_pos] = '\0';
                 }
 
-                // Add delimiter at the seam (between last and first) so when the
-                // marquee wraps, spacing is identical to between items
+                // Add a seam between end and beginning so wrap reads naturally
                 size_t cur_len = strlen(out);
                 if (cur_len > 0)
                 {
-                    // Only add delimiter if there are multiple items in the list
-                    if (RDSAssembler::rtListCount() > 1)
+                    std::size_t n = RDSAssembler::rtListCount();
+                    if (n > 1)
                     {
+                        // Same spacing as between items
                         size_t need = delim_len;
                         if (cur_len + need > out_sz - 1)
                             need = (out_sz - 1) - cur_len;
                         memcpy(out + cur_len, delim, need);
                         out[cur_len + need] = '\0';
+                    }
+                    else
+                    {
+                        // Single RT fallback: add a few spaces so repeats aren't glued
+                        const char gap[] = "      ";
+                        size_t gap_len = sizeof(gap) - 1;
+                        if (cur_len + gap_len > out_sz - 1)
+                            gap_len = (out_sz - 1) - cur_len;
+                        memcpy(out + cur_len, gap, gap_len);
+                        out[cur_len + gap_len] = '\0';
                     }
                 }
             };

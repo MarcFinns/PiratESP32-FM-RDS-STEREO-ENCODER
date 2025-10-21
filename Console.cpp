@@ -442,6 +442,9 @@ static void conf_build_blob(char *buf, size_t sz)
     char ps[9] = {0};
     RDSAssembler::getPS(ps);
     trim_trailing_spaces(ps);
+    char rt[65] = {0};
+    RDSAssembler::getRT(rt);
+    trim_trailing_spaces(rt);
     // Build RT list as quoted pipe-separated
     char rtlist[512];
     rtlist[0] = '\0';
@@ -458,12 +461,12 @@ static void conf_build_blob(char *buf, size_t sz)
         }
     }
     snprintf(buf, sz,
-             "PI=0x%04X;PTY=%u;TP=%u;TA=%u;MS=%u;PS=\"%s\";RTPERIOD=%u;RTLIST=%s;"
+             "PI=0x%04X;PTY=%u;TP=%u;TA=%u;MS=%u;PS=\"%s\";RT=\"%s\";RTPERIOD=%u;RTLIST=%s;"
              "AUDIO_STEREO=%u;PREEMPH=%u;RDS_ENABLE=%u;PILOT_ENABLE=%u;PILOT_AUTO=%u;PILOT_THRESH=%"
              "g;PILOT_HOLD=%u;LOG_LEVEL=%u",
              (unsigned)RDSAssembler::getPI(), (unsigned)RDSAssembler::getPTY(),
              (unsigned)RDSAssembler::getTP(), (unsigned)RDSAssembler::getTA(),
-             (unsigned)RDSAssembler::getMS(), ps, (unsigned)RDSAssembler::getRtPeriod(), rtlist,
+             (unsigned)RDSAssembler::getMS(), ps, rt, (unsigned)RDSAssembler::getRtPeriod(), rtlist,
              DSP_pipeline::getStereoEnable() ? 1 : 0, DSP_pipeline::getPreemphEnable() ? 1 : 0,
              DSP_pipeline::getRdsEnable() ? 1 : 0, DSP_pipeline::getPilotEnable() ? 1 : 0,
              DSP_pipeline::getPilotAuto() ? 1 : 0, (double)DSP_pipeline::getPilotThresh(),
@@ -533,6 +536,8 @@ static void apply_loaded_blob(const char *blob)
     int ms = read_int("MS", RDSAssembler::getMS() ? 1 : 0);
     char ps[64] = {0};
     read_str("PS", ps, sizeof(ps));
+    char rt[128] = {0};
+    read_str("RT", rt, sizeof(rt));
     unsigned rtper = read_uint("RTPERIOD", RDSAssembler::getRtPeriod());
     // Apply
     RDSAssembler::setPI((uint16_t)(pi & 0xFFFF));
@@ -542,6 +547,8 @@ static void apply_loaded_blob(const char *blob)
     RDSAssembler::setMS(ms != 0);
     if (ps[0])
         RDSAssembler::setPS(ps);
+    if (rt[0])
+        RDSAssembler::setRT(rt);
     RDSAssembler::setRtPeriod(rtper);
     // RTLIST: RTLIST="a"|"b"|"c"
     const char *pr = find_key(blob, "RTLIST");
