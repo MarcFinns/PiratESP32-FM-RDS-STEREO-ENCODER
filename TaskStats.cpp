@@ -135,7 +135,7 @@ bool collect(float &core0_load,
             audio_rt = ts.ulRunTimeCounter;
             audio_sw = ts.usStackHighWaterMark;
         }
-        else if (strcmp(ts.pcTaskName, "logger") == 0)
+        else if (strcmp(ts.pcTaskName, "console") == 0 || strcmp(ts.pcTaskName, "logger") == 0)
         {
             logger_rt = ts.ulRunTimeCounter;
             logger_sw = ts.usStackHighWaterMark;

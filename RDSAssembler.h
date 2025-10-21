@@ -18,8 +18,12 @@
  *   - Runs as a FreeRTOS task pinned to Core 1 (logger/display core)
  *   - Writes bits into a single-producer/single-consumer FreeRTOS queue
  *   - Overwrite semantics: if queue is full, oldest bit is dropped (freshness wins)
- *   - Skeleton content: currently outputs a PRBS placeholder; replace with real RDS
- *     group scheduler, CRC/checkwords, and offset words later
+ *   - Implements core RDS groups with proper CRC-10 and offset words:
+ *       • Group 0A: PI (A), TP/PTY/TA/MS (B), AF codes (C), PS name (D)
+ *       • Group 2A: PI (A), TP/PTY + RT A/B + segment (B), RT text (C/D)
+ *     Cycles groups in a simple scheduler (0A, 0A, 2A, …) so PS/flags are
+ *     transmitted twice as often as RT. RT A/B flag toggles on setRT() to
+ *     force receiver refresh. No CT (4A) or advanced groups are emitted.
  *
  * Threading model
  *   - Producer: Assembler task (Core 1)
@@ -157,6 +161,23 @@ class RDSAssembler : public ModuleBase
      * Copies and null-terminates into out[65].
      */
     static void getRT(char out[65]);
+
+    // Runtime getters for status queries
+    static uint16_t getPI();
+    static uint8_t getPTY();
+    static bool getTP();
+    static bool getTA();
+    static bool getMS();
+    static bool getRTAB();
+
+    // RadioText rotation list API
+    static void rtListAdd(const char *text);
+    static bool rtListDel(std::size_t idx);
+    static void rtListClear();
+    static std::size_t rtListCount();
+    static bool rtListGet(std::size_t idx, char *out, std::size_t out_sz);
+    static void setRtPeriod(uint32_t seconds);
+    static uint32_t getRtPeriod();
 
     /**
      * Set AF list (FM VHF, Method A). freqs_mhz: array of MHz (e.g., 101.1f).

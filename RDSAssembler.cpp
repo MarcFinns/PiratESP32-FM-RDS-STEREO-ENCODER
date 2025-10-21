@@ -20,7 +20,11 @@
 #include "DisplayManager.h"
 
 #include <cstring>
-#include "Log.h"
+#include <string>
+#include <vector>
+#include <algorithm>
+#include "Console.h"
+#include <esp_timer.h>
 
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -64,6 +68,12 @@ RDSAssembler::RDSAssembler()
     for (int i = 0; i < 25; ++i)
         af_codes_[i] = 0;
 }
+
+// ------------------- Rotation state (static) -------------------
+static std::vector<std::string> s_rt_list;
+static uint32_t s_rt_period_s = 30; // default seconds
+static std::size_t s_rt_index = 0;
+static uint64_t s_rt_next_switch_us = 0;
 
 // ==================================================================================
 //                          STATIC WRAPPER API
@@ -119,13 +129,15 @@ void RDSAssembler::setPS(const char *ps)
     RDSAssembler &rds = getInstance();
     if (!ps)
         return;
-    for (int i = 0; i < 8; ++i)
-    {
-        char c = ps[i];
-        if (c == '\0')
-            c = ' ';
-        rds.ps_[i] = c;
-    }
+    // Copy up to 8 characters, then pad with spaces.
+    // Avoid reading beyond the provided string to prevent garbage copy.
+    size_t len = 0;
+    while (len < 8 && ps[len] != '\0')
+        ++len;
+    for (size_t i = 0; i < len; ++i)
+        rds.ps_[i] = ps[i];
+    for (size_t i = len; i < 8; ++i)
+        rds.ps_[i] = ' ';
 }
 
 void RDSAssembler::setRT(const char *rt)
@@ -133,8 +145,8 @@ void RDSAssembler::setRT(const char *rt)
     RDSAssembler &rds = getInstance();
     if (!rt)
         return;
-    // Update display with full-length RT (UI-only, not limited to 64 chars)
-    DisplayManager::setDisplayRT(rt);
+    // Only update the 64-character broadcast window (A/B toggle). Display marquee
+    // is managed independently by DisplayManager from RTLIST or fallback RT.
     int i = 0;
     for (; i < 64 && rt[i] != '\0'; ++i)
         rds.rt_[i] = rt[i];
@@ -237,7 +249,7 @@ void RDSAssembler::taskTrampoline(void *arg)
 
 bool RDSAssembler::begin()
 {
-    Log::enqueuef(LogLevel::INFO, "RDSAssembler running on Core %d", xPortGetCoreID());
+    Console::enqueuef(LogLevel::INFO, "RDSAssembler running on Core %d", xPortGetCoreID());
     // Create FreeRTOS queue for RDS bits
     bit_queue_ = xQueueCreate((UBaseType_t)bit_queue_len_, sizeof(uint8_t));
     if (!bit_queue_)
@@ -379,6 +391,21 @@ void RDSAssembler::process()
     vTaskDelay(pdMS_TO_TICKS(1));
     accu_us += 1000;
 
+    // Handle RT rotation (pilot task cadence, coarse timer ok)
+    if (!s_rt_list.empty())
+    {
+        uint64_t now = esp_timer_get_time();
+        if (s_rt_period_s > 0 && now >= s_rt_next_switch_us)
+        {
+            if (s_rt_index >= s_rt_list.size())
+                s_rt_index = 0;
+            const std::string &cur = s_rt_list[s_rt_index];
+            setRT(cur.c_str());
+            s_rt_index = (s_rt_index + 1) % s_rt_list.size();
+            s_rt_next_switch_us = now + (uint64_t)s_rt_period_s * 1000000ULL;
+        }
+    }
+
     while (accu_us >= bit_us)
     {
         accu_us -= bit_us;
@@ -429,6 +456,92 @@ bool RDSAssembler::nextBitRaw(uint8_t &bit)
     }
 
     return true;
+}
+
+// ------------------- Runtime getters -------------------
+
+uint16_t RDSAssembler::getPI()
+{
+    return getInstance().pi_;
+}
+uint8_t RDSAssembler::getPTY()
+{
+    return getInstance().pty_;
+}
+bool RDSAssembler::getTP()
+{
+    return getInstance().tp_;
+}
+bool RDSAssembler::getTA()
+{
+    return getInstance().ta_;
+}
+bool RDSAssembler::getMS()
+{
+    return getInstance().ms_;
+}
+bool RDSAssembler::getRTAB()
+{
+    return getInstance().rt_ab_;
+}
+
+// ------------------- Rotation list API -------------------
+
+void RDSAssembler::rtListAdd(const char *text)
+{
+    if (!text)
+        return;
+    s_rt_list.emplace_back(text);
+    if (s_rt_list.size() == 1)
+    {
+        // schedule immediate switch to this first item
+        s_rt_index = 0;
+        s_rt_next_switch_us = esp_timer_get_time();
+    }
+}
+
+bool RDSAssembler::rtListDel(std::size_t idx)
+{
+    if (idx >= s_rt_list.size())
+        return false;
+    s_rt_list.erase(s_rt_list.begin() + idx);
+    if (s_rt_index >= s_rt_list.size())
+        s_rt_index = 0;
+    return true;
+}
+
+void RDSAssembler::rtListClear()
+{
+    s_rt_list.clear();
+    s_rt_index = 0;
+    s_rt_next_switch_us = 0;
+}
+
+std::size_t RDSAssembler::rtListCount()
+{
+    return s_rt_list.size();
+}
+
+bool RDSAssembler::rtListGet(std::size_t idx, char *out, std::size_t out_sz)
+{
+    if (!out || out_sz == 0 || idx >= s_rt_list.size())
+        return false;
+    const auto &s = s_rt_list[idx];
+    std::size_t n = std::min(out_sz - 1, s.size());
+    memcpy(out, s.data(), n);
+    out[n] = '\0';
+    return true;
+}
+
+void RDSAssembler::setRtPeriod(uint32_t seconds)
+{
+    s_rt_period_s = seconds;
+    s_rt_next_switch_us = esp_timer_get_time();
+}
+
+uint32_t RDSAssembler::getRtPeriod()
+{
+    return s_rt_period_s;
 }
 
 // =====================================================================================

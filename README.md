@@ -72,10 +72,9 @@ RST  (Reset):           GPIO 2
 - Must maintain strict timing for glitch-free audio
 
 **Core 1 (Non-Real-Time):**
-- `Logger` task (priority 2) - Serial diagnostics
+- `Console` task (priority 2) - Serial owner (CLI) + log draining
 - `VU Meter` task (priority 1) - Display rendering
 - `RDS Assembler` task (priority 1) - RDS bitstream generation
-- `RDS Demo` task (priority 1) - Station info updates
 
 ### Signal Flow
 
@@ -163,18 +162,18 @@ Task-to-core assignment is configured exclusively in `Config.h` and applied at r
 
 ```
 // Config.h core selections (0 or 1)
-LOGGER_CORE    // Logger task core
+CONSOLE_CORE   // Console task core
 VU_CORE        // VU display task core
 RDS_CORE       // RDS assembler task core
 DSP_CORE       // DSP pipeline task core
 
 // Related priorities and stacks are also defined in Config.h
-LOGGER_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
-LOGGER_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
+CONSOLE_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
+CONSOLE_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
 ```
 
 At startup, each module logs its actual core, for example:
-- "Logger running on Core X" (Serial)
+- "Console running on Core X" (Serial)
 - "VUMeter running on Core X"
 - "RDSAssembler running on Core X"
 - "DSP_pipeline running on Core X"
@@ -197,17 +196,16 @@ Edit pin assignments in `Config.h` to match your hardware.
 
 ### RDS Configuration
 
-Edit the `rds_demo_task()` function in the main `.ino` file (lines 58-87):
+Use the serial console (Console task) with SCPI-style commands (115200 baud):
 
-```cpp
-RDSAssembler::setPI(0x52A1);        // Program Identification code
-RDSAssembler::setPTY(10);           // Program Type (10 = Pop Music)
-RDSAssembler::setTP(true);          // Traffic Program flag
-RDSAssembler::setTA(false);         // Traffic Announcement flag
-RDSAssembler::setMS(true);          // Music/Speech flag (true = Music)
-RDSAssembler::setPS("MYRADIO ");    // Station name (8 chars, space-padded)
-RDSAssembler::setRT("Your message"); // RadioText (up to 64 chars)
-```
+Examples
+- `RDS:PI 0x52A1`
+- `RDS:PTY POP_MUSIC`
+- `RDS:PS "PiratESP"`
+- `RDS:RTLIST:ADD "Artist • Title • Album"`
+- `RDS:RTPERIOD 20`
+
+See `docs/SerialConsole.md` for the full command reference.
 
 ### Performance Monitoring
 
@@ -234,7 +232,7 @@ ESP32 RDS STEREO ENCODER/
 ├── RDSAssembler.h/.cpp            # RDS bitstream assembler
 ├── RDSSynth.h/.cpp                # RDS 57 kHz modulator
 ├── VUMeter.h/.cpp                 # TFT display driver
-├── Log.h/.cpp                     # Asynchronous logger
+├── Console.h/.cpp                 # Serial console (CLI) + log draining
 ├── AudioStats.h                   # Audio statistics tracker
 ├── TaskStats.h/.cpp               # FreeRTOS task profiling
 ├── Diagnostics.h/.cpp             # Debug utilities
@@ -253,7 +251,7 @@ ESP32 RDS STEREO ENCODER/
 **Memory Usage:**
 - DSP_pipeline stack: 12 KB
 - DSP buffers: ~9 KB
-- Logger stack: 4 KB
+- Console stack: 4 KB
 - VU Meter stack: 4 KB
 
 ## Technical Details

@@ -50,6 +50,35 @@
 namespace Config
 {
 // ==================================================================================
+//                              FIRMWARE METADATA
+// ==================================================================================
+/**
+ * Firmware Version String
+ *
+ * Semantic version or tag for the firmware build. Update this when making
+ * a release so it is reported in SYST:VERSION? and on the splash screen.
+ */
+constexpr const char *FIRMWARE_VERSION = "0.1.0";
+
+// ==================================================================================
+//                              SPLASH SCREEN SETTINGS
+// ==================================================================================
+/**
+ * Splash image vertical offset (pixels)
+ *
+ * Controls the Y position where the splash image starts.
+ * Set this to trim the vertical placement if the image is shorter than 240 px.
+ */
+constexpr int SPLASH_TOP_Y = 70;
+
+/**
+ * Splash image height (pixels)
+ *
+ * Set this to the actual height of the LOGO image in splashscreen.h.
+ * Width is assumed to be 320 px.
+ */
+constexpr int SPLASH_HEIGHT = 133;
+// ==================================================================================
 //                              GPIO PIN ASSIGNMENTS
 // ==================================================================================
 //
@@ -168,23 +197,24 @@ constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
 //
 // Core Assignment Strategy:
 //   Core 0: Audio processing (DSP_pipeline only - highest priority, no interruptions)
-//   Core 1: I/O operations (Logger, VU Meter, RDS - can block on I/O)
+//   Core 1: I/O operations (Console, VU Meter, RDS - can block on I/O)
 //
 // Priority Strategy (FreeRTOS ESP32):
 //   Level 6: Audio DSP (real-time, cannot block, highest priority)
-//   Level 2: Logger (diagnostics, medium priority)
+//   Level 2: Console (CLI + logs, medium priority)
 //   Level 1: VU Meter, RDS (display/RDS generation, low priority, can block)
 //   Level 0: Idle task (system)
 
-/** ---- LOGGER TASK ---- */
-/** Logger: Core Assignment (0 or 1) */
-constexpr int LOGGER_CORE = 1; // Core selection for Logger task
-/** Logger: Task Priority */
-constexpr uint32_t LOGGER_PRIORITY = 2; // Medium priority
-/** Logger: Stack Size (32-bit words) */
-constexpr uint32_t LOGGER_STACK_WORDS = 4096; // 16 KB
-/** Logger: Message Queue Capacity */
-constexpr std::size_t LOGGER_QUEUE_LEN = 256; // Larger buffer for verbose init
+/** ---- CONSOLE TASK (Serial owner + log draining) ---- */
+/** Console: Core Assignment (0 or 1) */
+constexpr int CONSOLE_CORE = 1; // Core selection for Console task
+/** Console: Task Priority */
+constexpr uint32_t CONSOLE_PRIORITY = 2; // Medium priority
+/** Console: Stack Size (32-bit words) */
+constexpr uint32_t CONSOLE_STACK_WORDS =
+    8192; // 32 KB (increase to avoid stack canary on heavy console parsing)
+/** Console: Message Queue Capacity */
+constexpr std::size_t CONSOLE_QUEUE_LEN = 256; // Larger buffer for verbose init
 
 /** ---- VU METER TASK ---- */
 /** VU Meter: Core Assignment (0 or 1) */
@@ -382,22 +412,7 @@ constexpr uint32_t SILENCE_HOLD_MS = 2000u;
  *
  * Value: 5,000,000 microseconds (5 seconds)
  */
-constexpr uint64_t STATS_PRINT_INTERVAL_US = 5000000ULL;
-
-// ==================================================================================
-//                             LEVEL TAPS (DIAGNOSTICS)
-// ==================================================================================
-// Optional lightweight peak logging at key pipeline stages to analyze headroom
-// and potential clipping. Disabled by default. Non‑destructive and easy to remove.
-
-/** Enable/disable level taps logging. */
-constexpr bool LEVEL_TAPS_ENABLE = true;
-
-/**
- * Level taps logging interval.
- * How often to print peak levels summary. Default matches perf logs (5 s).
- */
-constexpr uint64_t LEVEL_TAPS_INTERVAL_US = 5000000ULL;
+constexpr uint64_t STATS_PRINT_INTERVAL_US = 5000000ULL; // 600000000ULL; //
 
 // ==================================================================================
 //                          VU METER CONFIGURATION
@@ -669,9 +684,9 @@ constexpr uint32_t I2S_BCK_DIVISOR = 64;
 // ==================================================================================
 
 /**
- * Logger Task Priority
+ * Console Task Priority
  *
- * FreeRTOS priority level for the logging task.
+ * FreeRTOS priority level for the console task.
  * Higher values = higher priority (can preempt lower-priority tasks)
  *
  * Value: 2 (medium priority, preempts I/O but yields to audio)
@@ -679,9 +694,9 @@ constexpr uint32_t I2S_BCK_DIVISOR = 64;
 constexpr uint32_t LOG_TASK_PRIORITY = 2;
 
 /**
- * Logger Task Stack Size (Words)
+ * Console Task Stack Size (Words)
  *
- * Memory allocated for logger task stack.
+ * Memory allocated for console task stack.
  * Sufficient for string formatting and queue operations.
  *
  * Value: 4096 words (16 KB on 32-bit ESP32)
@@ -689,9 +704,9 @@ constexpr uint32_t LOG_TASK_PRIORITY = 2;
 constexpr uint32_t LOG_TASK_STACK_WORDS = 4096;
 
 /**
- * Logger Message Queue Length
+ * Console Message Queue Length
  *
- * Maximum number of log messages that can be queued before drops occur.
+ * Maximum number of console log messages that can be queued before drops occur.
  * Drop-on-overflow policy ensures real-time tasks don't block on logging.
  *
  * Value: 128 messages

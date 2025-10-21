@@ -39,7 +39,7 @@
 
 #pragma once
 
-#include "Log.h"
+#include "Console.h"
 
 #include <cstdint>
 
@@ -144,11 +144,11 @@ inline void logError(ErrorCode error, const char *context, const char *details =
     const char *error_str = errorCodeToString(error);
     if (details)
     {
-        Log::enqueuef(LogLevel::ERROR, "[%s] %s: %s", error_str, context, details);
+        Console::enqueuef(LogLevel::ERROR, "[%s] %s: %s", error_str, context, details);
     }
     else
     {
-        Log::enqueuef(LogLevel::ERROR, "[%s] %s", error_str, context);
+        Console::enqueuef(LogLevel::ERROR, "[%s] %s", error_str, context);
     }
 }
 
@@ -166,7 +166,7 @@ inline void logError(ErrorCode error, const char *context, const char *details =
  */
 inline void logWarning(const char *context, const char *message)
 {
-    Log::enqueuef(LogLevel::WARN, "[%s] %s", context, message);
+    Console::enqueuef(LogLevel::WARN, "[%s] %s", context, message);
 }
 
 /**
@@ -183,7 +183,7 @@ inline void logWarning(const char *context, const char *message)
  */
 inline void logInfo(const char *context, const char *message)
 {
-    Log::enqueuef(LogLevel::INFO, "[%s] %s", context, message);
+    Console::enqueuef(LogLevel::INFO, "[%s] %s", context, message);
 }
 
 /**

@@ -41,7 +41,7 @@
 #include "DisplayManager.h"
 
 #include "Config.h"
-#include "Log.h"
+#include "Console.h"
 #include "RDSAssembler.h"
 
 #include <Arduino.h>
@@ -176,7 +176,7 @@ bool DisplayManager::begin()
     // Initialize display (optional)
     if (Config::VU_DISPLAY_ENABLED)
     {
-        Log::enqueuef(LogLevel::INFO, "DisplayManager running on Core %d", xPortGetCoreID());
+        Console::enqueuef(LogLevel::INFO, "DisplayManager running on Core %d", xPortGetCoreID());
         if (Config::TFT_BL >= 0)
         {
             pinMode((int)Config::TFT_BL, OUTPUT);
@@ -193,9 +193,7 @@ bool DisplayManager::begin()
             gfx_->fillScreen(0x0000);
             gfx_->setTextWrap(false);
             gfx_->setTextColor(0xFFFF);
-            gfx_->setTextSize(2);
-            gfx_->setCursor(15, 10);
-            gfx_->print("PiratESP32 FM RDS STEREO");
+            // Removed top static title line; splash screen now provides branding
 
             // Draw static scale
             auto drawScale = [&]()
@@ -562,7 +560,8 @@ void DisplayManager::process()
             {
                 last_fetch_ms = now_ms;
                 RDSAssembler::getPS(ps);
-                // Snapshot the long-form UI RT (independent of RDS broadcast window)
+                // Legacy path kept (not used for marquee building anymore)
+                // s_ui_rt_long may be set by other modules, but marquee is derived from RTLIST.
                 strncpy(rt_ui, s_ui_rt_long, sizeof(rt_ui) - 1);
                 rt_ui[sizeof(rt_ui) - 1] = '\0';
             }
@@ -582,17 +581,45 @@ void DisplayManager::process()
             // Draw PS centered (size 3); only if changed
             gfx_->setTextSize(PS_SIZE);
             gfx_->setTextColor(COLOR_WHITE);
-            int ps_len = (int)strlen(ps);
+
+            // Create trimmed version: copy PS and remove trailing spaces
+            char ps_trimmed[9];
+            memset(ps_trimmed, 0, sizeof(ps_trimmed));  // Clear entire buffer
+            strncpy(ps_trimmed, ps, 8);
+            // Trim from the end: find last non-space character
+            for (int i = 7; i >= 0; --i)
+            {
+                if (ps_trimmed[i] != ' ')
+                {
+                    ps_trimmed[i + 1] = '\0';  // Null-terminate after last non-space
+                    break;
+                }
+                if (i == 0)
+                {
+                    ps_trimmed[0] = '\0';  // All spaces case
+                }
+            }
+
+            // Calculate position based on trimmed length for centering
+            int ps_len = (int)strlen(ps_trimmed);
+            // Approximate pixel width: each character is 6 pixels at size 1, scales with text size
             int ps_px = ps_len * CHAR_W * PS_SIZE;
             int ps_x = TEXT_AREA_X + (TEXT_AREA_W - ps_px) / 2;
             if (ps_x < TEXT_AREA_X)
                 ps_x = TEXT_AREA_X;
+
             static char ps_prev[9] = {0};
+
             if (strncmp(ps, ps_prev, 8) != 0)
             {
+                // Clear entire PS area completely
                 gfx_->fillRect(TEXT_AREA_X, TEXT_PS_Y - 2, TEXT_AREA_W, PS_H + 4, COLOR_BLACK);
+
+                // Draw trimmed PS centered
                 gfx_->setCursor(ps_x, TEXT_PS_Y);
-                gfx_->print(ps);
+                gfx_->print(ps_trimmed);
+
+                // Update previous values
                 memcpy(ps_prev, ps, 8);
                 ps_prev[8] = '\0';
             }
@@ -607,50 +634,72 @@ void DisplayManager::process()
             static char rt_disp[256] = {0};
             static int rt_off = 0;
 
-            // Build a long marquee only from RT (UI preferred, else broadcast 64c),
-            // flattening multi-line into one line with delimiter
-            auto build_marquee_from_rt = [](const char *in, char *out, size_t out_sz) {
-                if (!in || !out || out_sz == 0)
-                    return;
-                // Delimiter between pieces
-                const char *delim = " • ";
+            // Build marquee from RTLIST (concatenate items with a separator) and only
+            // recompute when the set of RT items changes (ADD/DEL/CLEAR). If the list
+            // is empty, fall back to the current broadcast RT (64 chars) so encoder
+            // display roughly matches receivers.
+            auto sanitize_ascii = [](const char *in, char *out, size_t out_sz) {
+                size_t pos = 0;
+                for (const char *p = in; *p && pos < out_sz - 1; ++p)
+                {
+                    unsigned char c = (unsigned char)*p;
+                    if (c >= 0x20 && c < 0x7F)
+                    {
+                        out[pos++] = (char)c;
+                    }
+                    else if (c == '\t')
+                    {
+                        out[pos++] = ' ';
+                    }
+                    // drop other control/non-ASCII
+                }
+                out[pos] = '\0';
+            };
+
+            auto build_marquee_from_rtlist = [&](char *out, size_t out_sz) {
+                out[0] = '\0';
+                size_t out_pos = 0;
+                const char *delim = " - "; // ASCII-safe delimiter for display
                 const size_t delim_len = strlen(delim);
 
-                // Temporary working buffer
-                char tmp[256];
-                size_t in_len = strnlen(in, sizeof(tmp) - 1);
-                memcpy(tmp, in, in_len);
-                tmp[in_len] = '\0';
-
-                // Normalize CR->\n and tabs->space
-                for (size_t i = 0; i < in_len; ++i)
+                std::size_t n = RDSAssembler::rtListCount();
+                if (n == 0)
                 {
-                    if (tmp[i] == '\r') tmp[i] = '\n';
-                    else if (tmp[i] == '\t') tmp[i] = ' ';
-                }
-
-                // Tokenize by \n and trim each piece, join with delimiter
-                size_t out_pos = 0;
-                const char *p = tmp;
-                bool first = true;
-                while (*p)
-                {
-                    // Extract line
-                    const char *line_start = p;
-                    const char *line_end = strchr(p, '\n');
-                    size_t line_len = line_end ? (size_t)(line_end - line_start)
-                                               : strlen(line_start);
-                    // Trim spaces
-                    while (line_len > 0 && (*line_start == ' '))
+                    // Fallback: use current broadcast RT window
+                    char rt64[65];
+                    RDSAssembler::getRT(rt64);
+                    // Trim trailing spaces
+                    for (int i = 63; i >= 0; --i)
                     {
-                        line_start++; line_len--;
+                        if (rt64[i] == ' ')
+                            rt64[i] = '\0';
+                        else
+                            break;
                     }
-                    while (line_len > 0 && (line_start[line_len - 1] == ' '))
-                        line_len--;
-
-                    if (line_len > 0)
+                    char clean[256];
+                    sanitize_ascii(rt64, clean, sizeof(clean));
+                    size_t len = strnlen(clean, sizeof(clean) - 1);
+                    if (len > out_sz - 1) len = out_sz - 1;
+                    memcpy(out, clean, len);
+                    out[len] = '\0';
+                }
+                else
+                {
+                    bool first = true;
+                    for (std::size_t i = 0; i < n; ++i)
                     {
-                        // Add delimiter if not first
+                        char item[256];
+                        if (!RDSAssembler::rtListGet(i, item, sizeof(item)))
+                            continue;
+                        char clean[256];
+                        sanitize_ascii(item, clean, sizeof(clean));
+                        // Trim spaces at both ends
+                        const char *s = clean;
+                        while (*s == ' ') ++s;
+                        size_t sl = strlen(s);
+                        while (sl > 0 && s[sl - 1] == ' ') { ((char *)s)[sl - 1] = '\0'; --sl; }
+                        if (sl == 0)
+                            continue;
                         if (!first)
                         {
                             if (out_pos + delim_len < out_sz - 1)
@@ -659,46 +708,72 @@ void DisplayManager::process()
                                 out_pos += delim_len;
                             }
                         }
-                        // Append token
-                        size_t to_copy = line_len;
+                        first = false;
+                        size_t to_copy = sl;
                         if (out_pos + to_copy >= out_sz - 1)
                             to_copy = (out_sz - 1) - out_pos;
-                        memcpy(out + out_pos, line_start, to_copy);
+                        memcpy(out + out_pos, s, to_copy);
                         out_pos += to_copy;
-                        first = false;
+                        if (out_pos >= out_sz - 1)
+                            break;
                     }
-
-                    p = line_end ? (line_end + 1) : (p + strlen(p));
-                }
-
-                // If empty, ensure out is zeroed; else add a gap at seam for smooth wrap
-                if (out_pos == 0)
-                {
-                    out[0] = '\0';
-                }
-                else
-                {
-                    const char gap[] = "      "; // 6 spaces
-                    size_t gap_len = sizeof(gap) - 1;
-                    if (out_pos + gap_len >= out_sz - 1)
-                        gap_len = (out_sz - 1) - out_pos;
-                    memcpy(out + out_pos, gap, gap_len);
-                    out_pos += gap_len;
                     out[out_pos] = '\0';
+                }
+
+                // Add delimiter at the seam (between last and first) so when the
+                // marquee wraps, spacing is identical to between items
+                size_t cur_len = strlen(out);
+                if (cur_len > 0)
+                {
+                    // Only add delimiter if there are multiple items in the list
+                    if (RDSAssembler::rtListCount() > 1)
+                    {
+                        size_t need = delim_len;
+                        if (cur_len + need > out_sz - 1)
+                            need = (out_sz - 1) - cur_len;
+                        memcpy(out + cur_len, delim, need);
+                        out[cur_len + need] = '\0';
+                    }
                 }
             };
 
-            // If new RT arrives, prepare a pending marquee from it (swap later at wrap)
-            // Use the long-form UI RT only (display is independent of broadcast length)
-            const char *src_pref = rt_ui;
-            static char last_src_seen[1024] = {0};
-            if (strncmp(src_pref, last_src_seen, sizeof(last_src_seen) - 1) != 0)
+            // Track changes in the RT list or fallback RT text using a signature string
+            static char last_sig[1024] = {0};
+            char sig[1024];
+            sig[0] = '\0';
             {
-                strncpy(last_src_seen, src_pref, sizeof(last_src_seen) - 1);
-                last_src_seen[sizeof(last_src_seen) - 1] = '\0';
+                std::size_t n = RDSAssembler::rtListCount();
+                if (n == 0)
+                {
+                    char rt64[65];
+                    RDSAssembler::getRT(rt64);
+                    // Use the RT value as signature when list is empty (so we refresh on RT changes)
+                    strncpy(sig, rt64, sizeof(sig) - 1);
+                    sig[sizeof(sig) - 1] = '\0';
+                }
+                else
+                {
+                    bool first = true;
+                    for (std::size_t i = 0; i < n; ++i)
+                    {
+                        char item[256];
+                        if (RDSAssembler::rtListGet(i, item, sizeof(item)))
+                        {
+                            if (!first) strncat(sig, "|", sizeof(sig) - strlen(sig) - 1);
+                            strncat(sig, item, sizeof(sig) - strlen(sig) - 1);
+                            first = false;
+                        }
+                    }
+                }
+            }
+
+            if (strncmp(sig, last_sig, sizeof(last_sig) - 1) != 0)
+            {
+                strncpy(last_sig, sig, sizeof(last_sig) - 1);
+                last_sig[sizeof(last_sig) - 1] = '\0';
                 char built[1024];
                 built[0] = '\0';
-                build_marquee_from_rt(last_src_seen, built, sizeof(built));
+                build_marquee_from_rtlist(built, sizeof(built));
                 if (strncmp(built, marquee_cur, sizeof(built)) != 0)
                 {
                     strncpy(marquee_pending, built, sizeof(marquee_pending) - 1);
@@ -797,7 +872,7 @@ void DisplayManager::process()
 
             if (stats.cpu_valid)
             {
-                snprintf(line, sizeof(line), "Tasks: Aud %.1f%%  Log %.1f%%  VU %.1f%%",
+                snprintf(line, sizeof(line), "Tasks: Aud %.1f%%  Console %.1f%%  VU %.1f%%",
                          (double)stats.audio_cpu, (double)stats.logger_cpu, (double)stats.vu_cpu);
                 gfx_->setCursor(4, y);
                 gfx_->print(line);

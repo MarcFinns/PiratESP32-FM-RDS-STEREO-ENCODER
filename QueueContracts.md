@@ -10,7 +10,7 @@ This document describes the inter-module communication patterns via FreeRTOS que
 
 | Module | Queue Name | Type | Size | Overflow Behavior | Reason |
 |--------|-----------|------|------|-------------------|--------|
-| **Log** | Logger queue | FIFO Drop | 64 msgs (10 KB) | Drop oldest message silently | Real-time, timestamp captures time anyway |
+| **Console** | Console log queue | FIFO Drop | 64 msgs (10 KB) | Drop oldest message silently | Real-time, timestamp captures time anyway |
 | **VUMeter** | Sample queue | Mailbox | 1 sample | Overwrite old sample | Only latest peak matters |
 | **VUMeter** | Stats queue | Mailbox | 1 snapshot | Overwrite old snapshot | Only latest stats matter |
 | **RDSAssembler** | Bit queue | FIFO Drop-oldest | 1024 bits | Drop oldest bit if full | Sequential RDS stream, recover sync by advancing |
@@ -20,7 +20,7 @@ This document describes the inter-module communication patterns via FreeRTOS que
 
 ## Detailed Queue Specifications
 
-### 1. Log Module - Logger Queue
+### 1. Console Module - Log Queue
 
 **Queue Type:** FIFO with drop-on-overflow
 
@@ -32,7 +32,7 @@ This document describes the inter-module communication patterns via FreeRTOS que
 
 **Overflow Semantics:**
 ```cpp
-bool Log::enqueueRaw(LogLevel level, const char *msg) {
+bool Console::enqueueRaw(LogLevel level, const char *msg) {
     if (xQueueSend(queue_, &entry, 0) != pdTRUE) {
         ++dropped_count_;  // Counter incremented
         return false;      // Message dropped silently
@@ -57,8 +57,8 @@ bool Log::enqueueRaw(LogLevel level, const char *msg) {
 **Usage Pattern:**
 ```cpp
 // From DSP_pipeline or VUMeter (Core 1)
-Log::enqueuef(LogLevel::ERROR, "I2S read failed: %d", error_code);
-// Logger task asynchronously drains queue to Serial
+Console::enqueuef(LogLevel::ERROR, "I2S read failed: %d", error_code);
+// Console task asynchronously drains queue to Serial
 ```
 
 ---
@@ -248,7 +248,7 @@ This ensures real-time code never waits for queue operations.
 - Cannot afford dynamic memory allocation
 - Uses non-blocking sends only
 
-**Non-Real-Time Path (Core 1 - Display/Logger):**
+**Non-Real-Time Path (Core 1 - Display/Console):**
 - Can wait on queues to consume messages
 - Display updates at 50 FPS (20 ms interval)
 - Can perform I/O operations
@@ -334,4 +334,3 @@ This design ensures:
 - ✅ Graceful degradation under load
 - ✅ Clear communication patterns
 - ✅ Visible error tracking
-

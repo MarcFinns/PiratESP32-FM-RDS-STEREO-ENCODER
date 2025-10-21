@@ -115,7 +115,7 @@
  *
  * Communication Patterns (All via FreeRTOS Queues):
  *   • SENDS TO: VUMeter (audio levels, statistics)
- *   • SENDS TO: Logger (performance metrics, diagnostics)
+ *   • SENDS TO: Console (performance metrics, diagnostics)
  *   • READS FROM: RDSAssembler (RDS bit stream for injection)
  *   • READS FROM: Hardware driver (audio samples)
  *   Queue operations are non-blocking with overwrite semantics
@@ -123,6 +123,22 @@
 class DSP_pipeline
 {
   public:
+    // ---------------- Runtime controls (Console) ----------------
+    static void setStereoEnable(bool en);
+    static bool getStereoEnable();
+    static void setRdsEnable(bool en);
+    static bool getRdsEnable();
+    static void setPreemphEnable(bool en);
+    static bool getPreemphEnable();
+    static void setPilotAuto(bool en);
+    static bool getPilotAuto();
+    static void setPilotThresh(float thr);
+    static float getPilotThresh();
+    static void setPilotHold(uint32_t ms);
+    static uint32_t getPilotHold();
+    static void setPilotEnable(bool en);
+    static bool getPilotEnable();
+
     // ==================================================================================
     //                          PUBLIC INTERFACE
     // ==================================================================================

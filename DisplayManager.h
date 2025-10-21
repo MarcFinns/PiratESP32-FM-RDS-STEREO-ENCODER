@@ -131,7 +131,7 @@ struct VUStatsSnapshot
     float cpu_headroom;  // percent
     float total_us_cur;  // processing time current
     float total_us_min;  // min
-    float total_us_max;  // max
+    float total_us_max;   // max
     float fir_us_cur;    // upsample stage current
     float mpx_us_cur;    // mpx stage current
     float matrix_us_cur; // stereo matrix stage current
@@ -436,7 +436,7 @@ class DisplayManager : public ModuleBase
 
 // Backward compatibility aliases for old namespace-based API
 // Backward compatibility aliases
-using VUMeter = DisplayManager;
+//using VUMeter = DisplayManager;
 
 namespace DisplayManager_NS
 {

@@ -55,7 +55,7 @@
 #include "I2SDriver.h"
 
 #include "Config.h"
-#include "Log.h"
+#include "Console.h"
 
 #include <Arduino.h>
 #include <cstdarg>
@@ -82,7 +82,7 @@ namespace AudioIO
             va_start(ap, fmt);
             vsnprintf(buf, sizeof(buf), fmt, ap);
             va_end(ap);
-            if (!Log::enqueue(level, buf))
+            if (!Console::enqueue(level, buf))
             {
                 if (level == LogLevel::ERROR)
                 {

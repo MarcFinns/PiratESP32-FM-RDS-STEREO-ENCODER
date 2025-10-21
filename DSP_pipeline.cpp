@@ -31,10 +31,11 @@
 #include "Diagnostics.h"
 #include "ModuleBase.h"
 #include "ErrorHandler.h"
-#include "Log.h"
+#include "Console.h"
 #include "RDSSynth.h"
 #include "TaskStats.h"
 #include "DisplayManager.h"
+#include "RDSAssembler.h"
 
 #include <Arduino.h>
 #include <esp32-hal-cpu.h>
@@ -78,6 +79,30 @@ DSP_pipeline::DSP_pipeline(IHardwareDriver *hardware_driver)
     stats_.reset();
 }
 
+// ---------------- Runtime control state ----------------
+static volatile bool s_rds_enable = Config::ENABLE_RDS_57K;
+static volatile bool s_stereo_enable = Config::ENABLE_STEREO_SUBCARRIER_38K;
+static volatile bool s_preemph_enable = Config::ENABLE_PREEMPHASIS;
+static volatile bool s_pilot_auto = Config::PILOT_MUTE_ON_SILENCE;
+static volatile bool s_pilot_enable = Config::ENABLE_STEREO_PILOT_19K;
+static volatile float s_pilot_thresh = Config::SILENCE_RMS_THRESHOLD;
+static volatile uint32_t s_pilot_hold_ms = Config::SILENCE_HOLD_MS;
+
+void DSP_pipeline::setStereoEnable(bool en) { s_stereo_enable = en; }
+bool DSP_pipeline::getStereoEnable() { return s_stereo_enable; }
+void DSP_pipeline::setRdsEnable(bool en) { s_rds_enable = en; }
+bool DSP_pipeline::getRdsEnable() { return s_rds_enable; }
+void DSP_pipeline::setPreemphEnable(bool en) { s_preemph_enable = en; }
+bool DSP_pipeline::getPreemphEnable() { return s_preemph_enable; }
+void DSP_pipeline::setPilotAuto(bool en) { s_pilot_auto = en; }
+bool DSP_pipeline::getPilotAuto() { return s_pilot_auto; }
+void DSP_pipeline::setPilotThresh(float thr) { s_pilot_thresh = thr; }
+float DSP_pipeline::getPilotThresh() { return s_pilot_thresh; }
+void DSP_pipeline::setPilotHold(uint32_t ms) { s_pilot_hold_ms = ms; }
+uint32_t DSP_pipeline::getPilotHold() { return s_pilot_hold_ms; }
+void DSP_pipeline::setPilotEnable(bool en) { s_pilot_enable = en; }
+bool DSP_pipeline::getPilotEnable() { return s_pilot_enable; }
+
 // ==================================================================================
 //                          INITIALIZATION (begin)
 // ==================================================================================
@@ -111,8 +136,8 @@ DSP_pipeline::DSP_pipeline(IHardwareDriver *hardware_driver)
 bool DSP_pipeline::begin()
 {
     // Log system configuration
-    Log::enqueue(LogLevel::INFO, "ESP32-S3 Audio DSP: 48kHz -> 192kHz");
-    Log::enqueuef(LogLevel::INFO, "DSP_pipeline running on Core %d", xPortGetCoreID());
+    Console::enqueue(LogLevel::INFO, "ESP32-S3 Audio DSP: 48kHz -> 192kHz");
+    Console::enqueuef(LogLevel::INFO, "DSP_pipeline running on Core %d", xPortGetCoreID());
 
     // Verify SIMD/ESP32-S3 specific optimizations are available
     Diagnostics::verifySIMD();
@@ -122,7 +147,7 @@ bool DSP_pipeline::begin()
     // Avoid double-initialization here to prevent redundant driver setup.
     if (!hardware_driver_ || !hardware_driver_->isReady())
     {
-        Log::enqueue(LogLevel::ERROR, "Hardware driver not ready (initialize via SystemContext first)");
+        Console::enqueue(LogLevel::ERROR, "Hardware driver not ready (initialize via SystemContext first)");
         return false;
     }
 
@@ -160,7 +185,7 @@ bool DSP_pipeline::begin()
     mpx_synth_.setPilotAmp(Config::PILOT_AMP);
 
     // Initialization complete, ready to process audio
-    Log::enqueue(LogLevel::INFO, "System Ready - Starting Audio Processing");
+    Console::enqueue(LogLevel::INFO, "System Ready - Starting Audio Processing");
 
     return true;
 }
@@ -368,7 +393,7 @@ void DSP_pipeline::writeToDAC(std::size_t frames_read)
 
     if (bytes_written != bytes_to_write)
     {
-        Log::enqueuef(LogLevel::WARN, "Underrun (wrote %u/%u bytes)", (unsigned)bytes_written,
+        Console::enqueuef(LogLevel::WARN, "Underrun (wrote %u/%u bytes)", (unsigned)bytes_written,
                       (unsigned)bytes_to_write);
     }
 
@@ -388,7 +413,11 @@ void DSP_pipeline::updatePerformanceMetrics(uint32_t total_us, std::size_t frame
     {
         stats_.last_print_us = now;
         float available_us = (frames_read * 1'000'000.0f) / static_cast<float>(SAMPLE_RATE_ADC);
-        float cpu_usage = (available_us > 0.0f) ? (total_us / available_us * 100.0f) : 0.0f;
+        float compute_us = static_cast<float>(stats_.total.current) -
+                           static_cast<float>(stats_.stage_i2s_rx_wait.current);
+        if (compute_us < 0.0f)
+            compute_us = 0.0f;
+        float cpu_usage = (available_us > 0.0f) ? (compute_us / available_us * 100.0f) : 0.0f;
         float cpu_headroom = 100.0f - cpu_usage;
         printPerformance(frames_read, available_us, cpu_usage, cpu_headroom);
     }
@@ -502,7 +531,7 @@ void DSP_pipeline::process()
     // STAGE 2: FM Pre-Emphasis Filter (Optional)
     // ============================================================================
     uint32_t t1 = t0;
-    if (Config::ENABLE_PREEMPHASIS)
+    if (s_preemph_enable)
     {
         t0 = t1;
         preemphasis_.process(rx_f32_, frames_read);
@@ -545,49 +574,46 @@ void DSP_pipeline::process()
     t0 = t1;
 
     // Pilot auto-mute control (based on input silence)
-    if (Config::PILOT_MUTE_ON_SILENCE && Config::ENABLE_STEREO_PILOT_19K)
+    if (s_pilot_auto && s_pilot_enable)
     {
         const float level = std::max(l_rms, r_rms);
         const uint64_t now_us = esp_timer_get_time();
-        const uint64_t hold_us = static_cast<uint64_t>(Config::SILENCE_HOLD_MS) * 1000ULL;
+        const uint64_t hold_us = static_cast<uint64_t>(s_pilot_hold_ms) * 1000ULL;
 
-        if (level >= Config::SILENCE_RMS_THRESHOLD)
+        if (level >= s_pilot_thresh)
         {
             // Audio present: unmute immediately if muted
             last_above_thresh_us_ = now_us;
-            if (pilot_muted_)
-            {
-                mpx_synth_.setPilotAmp(Config::PILOT_AMP);
-                pilot_muted_ = false;
-            }
+            if (pilot_muted_) { pilot_muted_ = false; }
         }
         else
         {
             // Below threshold: if held long enough, mute pilot
-            if (!pilot_muted_ && (now_us - last_above_thresh_us_) >= hold_us)
-            {
-                mpx_synth_.setPilotAmp(0.0f);
-                pilot_muted_ = true;
-            }
+            if (!pilot_muted_ && (now_us - last_above_thresh_us_) >= hold_us) { pilot_muted_ = true; }
         }
     }
 
     // Generate phase-coherent carriers (19 kHz pilot, 38 kHz subcarrier, 57 kHz RDS)
-    bool need19 = Config::ENABLE_STEREO_PILOT_19K;
-    bool need38 = (Config::ENABLE_AUDIO && Config::ENABLE_STEREO_SUBCARRIER_38K);
-    bool need57 = Config::ENABLE_RDS_57K;
+    bool need19 = (Config::ENABLE_STEREO_PILOT_19K && s_pilot_enable);
+    bool need38 = (Config::ENABLE_AUDIO && s_stereo_enable);
+    bool need57 = (s_rds_enable);
     if (need19 || need38 || need57)
     {
         pilot_19k_.generate_harmonics(pilot_buffer_, subcarrier_buffer_, carrier57_buffer_,
                                       samples);
     }
 
+    // Decide pilot amplitude at this moment (enable + auto-mute state)
+    {
+        float desired_amp = (s_pilot_enable && !pilot_muted_) ? Config::PILOT_AMP : 0.0f;
+        mpx_synth_.setPilotAmp(desired_amp);
+    }
     // Mix mono + pilot + stereo subcarrier
     mpx_synth_.process(mono_buffer_, diff_buffer_, pilot_buffer_, subcarrier_buffer_, mpx_buffer_,
                        samples);
 
     // Inject RDS if enabled
-    if (Config::ENABLE_RDS_57K)
+    if (s_rds_enable)
     {
         uint32_t t_r0 = ESP.getCycleCount();
         rds_synth_.processBlockWithCarrier(carrier57_buffer_, Config::RDS_AMP, rds_buffer_,
@@ -737,7 +763,7 @@ void DSP_pipeline::taskTrampoline(void *arg)
     // Initialize hardware and DSP modules
     if (!self->begin())
     {
-        Log::enqueue(LogLevel::ERROR, "DSP_pipeline begin() failed");
+        Console::enqueue(LogLevel::ERROR, "DSP_pipeline begin() failed");
         vTaskDelete(nullptr); // Exit task on initialization failure
         return;
     }
@@ -829,72 +855,77 @@ void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us,
     (void)frames_read; // Unused parameter (reserved for future use)
 
     // Print formatted header
-    Log::enqueue(LogLevel::INFO, "========================================");
-    Log::enqueue(LogLevel::INFO, "Performance Stats");
-    Log::enqueue(LogLevel::INFO, "========================================");
+    Console::enqueue(LogLevel::INFO, "========================================");
+    Console::enqueue(LogLevel::INFO, "Performance Stats");
+    Console::enqueue(LogLevel::INFO, "========================================");
 
     // Summary
-    Log::enqueuef(LogLevel::INFO, "Loops completed: %u", stats_.loops_completed);
-    Log::enqueuef(LogLevel::INFO, "Errors: %u", stats_.errors);
+    Console::enqueuef(LogLevel::INFO, "Loops completed: %u", stats_.loops_completed);
+    Console::enqueuef(LogLevel::INFO, "Errors: %u", stats_.errors);
     float uptime_s = (esp_timer_get_time() - stats_.start_time_us) / 1'000'000.0f;
-    Log::enqueuef(LogLevel::INFO, "Uptime: %.1f seconds", uptime_s);
+    Console::enqueuef(LogLevel::INFO, "Uptime: %.1f seconds", uptime_s);
 
     // Processing times
-    Log::enqueue(LogLevel::INFO, "----------------------------------------");
-    Log::enqueue(LogLevel::INFO, "Processing time:");
-    Log::enqueuef(LogLevel::INFO, "  Current: %.2f µs", (double)stats_.total.current);
-    Log::enqueuef(LogLevel::INFO, "  Min: %.2f µs", (double)stats_.total.min);
-    Log::enqueuef(LogLevel::INFO, "  Max: %.2f µs", (double)stats_.total.max);
-    Log::enqueuef(LogLevel::INFO, "  Available: %.2f µs", (double)available_us);
-    Log::enqueuef(LogLevel::INFO, "CPU usage: %.1f%%", (double)cpu_usage);
-    Log::enqueuef(LogLevel::INFO, "CPU headroom: %.1f%%", (double)cpu_headroom);
+    Console::enqueue(LogLevel::INFO, "----------------------------------------");
+    Console::enqueue(LogLevel::INFO, "Processing time:");
+    Console::enqueuef(LogLevel::INFO, "  Total (incl. I/O waits): %.2f µs", (double)stats_.total.current);
+    {
+        float compute_us = (float)stats_.total.current - (float)stats_.stage_i2s_rx_wait.current;
+        if (compute_us < 0.0f) compute_us = 0.0f;
+        Console::enqueuef(LogLevel::INFO, "  Compute (excl. I/O waits): %.2f µs", (double)compute_us);
+    }
+    Console::enqueuef(LogLevel::INFO, "  Min: %.2f µs", (double)stats_.total.min);
+    Console::enqueuef(LogLevel::INFO, "  Max: %.2f µs", (double)stats_.total.max);
+    Console::enqueuef(LogLevel::INFO, "  Available: %.2f µs", (double)available_us);
+    Console::enqueuef(LogLevel::INFO, "CPU usage: %.1f%%", (double)cpu_usage);
+    Console::enqueuef(LogLevel::INFO, "CPU headroom: %.1f%%", (double)cpu_headroom);
 
     // Per-stage breakdown
-    Log::enqueue(LogLevel::INFO, "----------------------------------------");
-    Log::enqueue(LogLevel::INFO, "Per-Stage Breakdown:");
-    Log::enqueue(LogLevel::INFO, "  1a. I2S RX wait (block):");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "----------------------------------------");
+    Console::enqueue(LogLevel::INFO, "Per-Stage Breakdown:");
+    Console::enqueue(LogLevel::INFO, "  1a. I2S RX wait (block):");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_i2s_rx_wait.current, (double)stats_.stage_i2s_rx_wait.min,
                   (double)stats_.stage_i2s_rx_wait.max);
-    Log::enqueue(LogLevel::INFO, "  1b. Deinterleave (int→float):");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  1b. Deinterleave (int→float):");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_int_to_float.current, (double)stats_.stage_int_to_float.min,
                   (double)stats_.stage_int_to_float.max);
-    Log::enqueue(LogLevel::INFO, "  2. Gain processing:");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  2. Gain processing:");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_preemphasis.current, (double)stats_.stage_preemphasis.min,
                   (double)stats_.stage_preemphasis.max);
-    Log::enqueue(LogLevel::INFO, "  3. 19 kHz notch:");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  3. 19 kHz notch:");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_notch.current, (double)stats_.stage_notch.min,
                   (double)stats_.stage_notch.max);
-    Log::enqueue(LogLevel::INFO, "  4. Upsample 4× (FIR):");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  4. Upsample 4× (FIR):");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_upsample.current, (double)stats_.stage_upsample.min,
                   (double)stats_.stage_upsample.max);
-    Log::enqueue(LogLevel::INFO, "  5. Stereo matrix:");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  5. Stereo matrix:");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_matrix.current, (double)stats_.stage_matrix.min,
                   (double)stats_.stage_matrix.max);
-    Log::enqueue(LogLevel::INFO, "  6. MPX synthesis:");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  6. MPX synthesis:");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_mpx.current, (double)stats_.stage_mpx.min,
                   (double)stats_.stage_mpx.max);
-    Log::enqueue(LogLevel::INFO, "  7. RDS injection:");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  7. RDS injection:");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_rds.current, (double)stats_.stage_rds.min,
                   (double)stats_.stage_rds.max);
-    Log::enqueue(LogLevel::INFO, "  8. Conversion (float→int):");
-    Log::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
+    Console::enqueue(LogLevel::INFO, "  8. Conversion (float→int):");
+    Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
                   (double)stats_.stage_float_to_int.current, (double)stats_.stage_float_to_int.min,
                   (double)stats_.stage_float_to_int.max);
 
     // Footer
-    Log::enqueue(LogLevel::INFO, "----------------------------------------");
-    Log::enqueuef(LogLevel::INFO, "Free heap: %u bytes", (unsigned)ESP.getFreeHeap());
-    Log::enqueuef(LogLevel::INFO, "Min free heap: %u bytes", (unsigned)ESP.getMinFreeHeap());
+    Console::enqueue(LogLevel::INFO, "----------------------------------------");
+    Console::enqueuef(LogLevel::INFO, "Free heap: %u bytes", (unsigned)ESP.getFreeHeap());
+    Console::enqueuef(LogLevel::INFO, "Min free heap: %u bytes", (unsigned)ESP.getMinFreeHeap());
     // Gain reporting removed per request
-    Log::enqueue(LogLevel::INFO, "========================================");
+    Console::enqueue(LogLevel::INFO, "========================================");
 }
 
 // ==================================================================================
@@ -939,18 +970,18 @@ void DSP_pipeline::printDiagnostics(std::size_t frames_read, int32_t peak_adc, i
     (void)frames_read; // Unused parameter (reserved for future use)
 
     // Print diagnostic header
-    Log::enqueue(LogLevel::INFO, "=== SIGNAL LEVEL DIAGNOSTIC ===");
+    Console::enqueue(LogLevel::INFO, "=== SIGNAL LEVEL DIAGNOSTIC ===");
 
     // ADC input level (baseline measurement)
-    Log::enqueuef(LogLevel::INFO, "ADC Peak: %d (%.1f%%)", peak_adc,
+    Console::enqueuef(LogLevel::INFO, "ADC Peak: %d (%.1f%%)", peak_adc,
                   (peak_adc / 2147483647.0f) * 100.0f);
 
     // Post-pre-emphasis level and gain
-    Log::enqueuef(LogLevel::INFO, "After Pre: %d (%.1f%%)  Pre Gain: %.2f dB", peak_pre,
+    Console::enqueuef(LogLevel::INFO, "After Pre: %d (%.1f%%)  Pre Gain: %.2f dB", peak_pre,
                   (peak_pre / 2147483647.0f) * 100.0f, pre_db);
 
     // Post-FIR level and total gain
-    Log::enqueuef(LogLevel::INFO, "After FIR: %d (%.1f%%)  Total Gain: %.2f dB", peak_fir,
+    Console::enqueuef(LogLevel::INFO, "After FIR: %d (%.1f%%)  Total Gain: %.2f dB", peak_fir,
                   (peak_fir / 2147483647.0f) * 100.0f, total_db);
 }
 

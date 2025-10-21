@@ -2,20 +2,20 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
- *                        Lock-Free Logger Interface
+ *                        Console Interface
  *
  * =====================================================================================
  *
- * File:         Log.h
- * Description:  Non-blocking logging system for real-time audio applications
+ * File:         Console.h
+ * Description:  Serial console (CLI) + non-blocking log draining for RT audio
  *
  * Architecture:
- *   The logger runs on a separate FreeRTOS task (typically Core 1) to prevent
+ *   The console runs on a separate FreeRTOS task (typically Core 1) to prevent
  *   Serial I/O blocking from interfering with real-time audio processing on
  *   Core 0. Messages are enqueued via a lock-free FreeRTOS queue and drained
- *   asynchronously by the logger task.
+ *   asynchronously by the console task.
  *
- *   The Log class inherits from ModuleBase and follows the standardized task
+ *   The Console class inherits from ModuleBase and follows the standardized task
  *   lifecycle pattern for consistency with other system modules.
  *
  * Key Features:
@@ -27,9 +27,9 @@
  *   * ModuleBase compliance: Unified lifecycle management (begin/process/shutdown)
  *
  * Usage Pattern:
- *   1. Call Log::startTask() during setup (runs on Core 1)
- *   2. From audio thread (Core 0), call Log::enqueuef() to send messages
- *   3. Logger task drains queue and prints to Serial asynchronously
+ *   1. Call Console::startTask() during setup (runs on Core 1)
+ *   2. From audio thread (Core 0), call Console::enqueuef() to send messages
+ *   3. Console task drains queue and prints to Serial asynchronously
  *
  * Thread Safety:
  *   All public functions are safe to call from any task or ISR context.
@@ -69,12 +69,12 @@ enum class LogLevel : uint8_t
 };
 
 /**
- * Log - Lock-Free Logger Module
+ * Console - Serial Console + Log Drainer
  *
  * Thread-safe, non-blocking logging system for real-time audio applications.
  * Inherits from ModuleBase to provide unified task lifecycle management.
  *
- * The logger task runs continuously on a dedicated FreeRTOS core (typically Core 1),
+ * The console task runs continuously on a dedicated FreeRTOS core (typically Core 1),
  * draining messages from a fixed-size queue and outputting them to Serial. Producers
  * (audio task, display task, etc.) enqueue messages non-blockingly, ensuring real-time
  * operations are never delayed by I/O.
@@ -96,11 +96,11 @@ enum class LogLevel : uint8_t
  *   * Non-blocking: Immediate return, never waits
  *   * Memory per message: 160 bytes (timestamp + level + 159-char string)
  */
-class Log : public ModuleBase
+class Console : public ModuleBase
 {
   public:
     /**
-     * Get Logger Singleton Instance
+     * Get Console Singleton Instance
      *
      * Returns reference to the single global Log instance.
      * This instance is created statically and manages the entire
@@ -109,19 +109,19 @@ class Log : public ModuleBase
      * Returns:
      *   Reference to the singleton Log instance
      */
-    static Log &getInstance();
+    static Console &getInstance();
 
     /**
-     * Initialize Logger System and Start Task
+     * Initialize Console System and Start Task
      *
-     * Creates a FreeRTOS queue and spawns the logger task on the specified core.
-     * The logger task will drain the queue and output messages to Serial.
+     * Creates a FreeRTOS queue and spawns the console task on the specified core.
+     * The console task will drain the queue and output messages to Serial.
      *
      * Static wrapper for backward compatibility that delegates to the singleton.
      *
      * Parameters:
      *   queue_len:    Number of log messages the queue can hold (default: 64)
-     *   core_id:      FreeRTOS core to pin the logger task (default: 1)
+     *   core_id:      FreeRTOS core to pin the console task (default: 1)
      *   priority:     FreeRTOS task priority (default: 2)
      *   stack_words:  Task stack size in 32-bit words (default: 4096 = 16 KB)
      *
@@ -132,7 +132,7 @@ class Log : public ModuleBase
                       uint32_t stack_words = 4096);
 
     /**
-     * Start Logger Task (Convenience Wrapper)
+     * Start Console Task (Convenience Wrapper)
      *
      * Alternative initialization function with parameter order matching
      * other system modules for consistency across the codebase.
@@ -149,7 +149,7 @@ class Log : public ModuleBase
      *   true if initialization successful, false on failure
      *
      * Example:
-     *   Log::startTask(1, 2, 4096, 128);
+     *   Console::startTask(1, 2, 4096, 128);
      */
     static bool startTask(int core_id, uint32_t priority, uint32_t stack_words,
                           size_t queue_len = 64);
@@ -173,7 +173,7 @@ class Log : public ModuleBase
      *   false if queue is full (message dropped)
      *
      * Example:
-     *   Log::enqueuef(LogLevel::INFO, "Audio block %d processed", block);
+     *   Console::enqueuef(LogLevel::INFO, "Audio block %d processed", block);
      */
   static bool enqueuef(LogLevel level, const char *fmt, ...);
 
@@ -193,7 +193,7 @@ class Log : public ModuleBase
      *   false if queue is full
      *
      * Example:
-     *   Log::enqueue(LogLevel::WARN, "Custom message");
+     *   Console::enqueue(LogLevel::WARN, "Custom message");
      */
     static bool enqueue(LogLevel level, const char *msg);
 
@@ -210,10 +210,21 @@ class Log : public ModuleBase
     static bool printfOrSerial(LogLevel level, const char *fmt, ...);
 
     /**
-     * Returns true once the logger task has begun and is running
+     * Returns true once the console task has begun and is running
      * (i.e., queue is created and begin() completed).
      */
     static bool isReady();
+
+    /**
+     * Mark End of Startup Phase
+     *
+     * Called after "System Ready" message to indicate that startup initialization
+     * is complete. When SYST:LOG:LEVEL is set to OFF, this allows the system to
+     * show the full startup sequence but then suppress periodic logging.
+     *
+     * Should be called from DSP_pipeline::begin() after final initialization.
+     */
+    static void markStartupComplete();
 
   private:
     /**
@@ -221,12 +232,12 @@ class Log : public ModuleBase
      *
      * Initializes module state. Only called once during getInstance().
      */
-    Log();
+    Console();
 
     /**
      * Virtual Destructor Implementation
      */
-    virtual ~Log() = default;
+    virtual ~Console() = default;
 
     /**
      * Initialize Module Resources (ModuleBase contract)
@@ -300,7 +311,7 @@ class Log : public ModuleBase
     // ==================================================================================
 
     /**
-     * Logger Queue Handle
+     * Console Queue Handle
      *
      * FreeRTOS queue for log messages. Created during begin() and destroyed
      * during shutdown().
@@ -325,7 +336,7 @@ class Log : public ModuleBase
     /**
      * Configuration: Core ID
      *
-     * FreeRTOS core (0 or 1) that the logger task runs on. Typically 1.
+     * FreeRTOS core (0 or 1) that the console task runs on. Typically 1.
      */
     int core_id_;
 

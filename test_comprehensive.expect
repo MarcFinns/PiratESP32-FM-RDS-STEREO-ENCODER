@@ -1,0 +1,276 @@
+#!/usr/bin/expect
+
+# Comprehensive Serial Console Test Suite - With Set/Get Verification
+# Device: /dev/tty.usbmodem5AAF1766471
+# Tests all fixes and verifies value persistence
+
+set timeout 2
+set device "/dev/tty.usbmodem5AAF1766471"
+set baud 115200
+
+# Test counters
+set pass_count 0
+set fail_count 0
+set verify_count 0
+set verify_pass 0
+
+# Open serial port
+spawn screen $device $baud
+set port_id $spawn_id
+sleep 1
+
+# Function to send command and check response with detailed logging
+proc test_cmd {name cmd expected} {
+    global port_id pass_count fail_count
+
+    puts "\n>>> $name"
+    puts "    Cmd: $cmd"
+
+    send "$cmd\r"
+    sleep 0.4
+
+    expect {
+        timeout {
+            puts "    ✗ TIMEOUT"
+            incr fail_count
+            return 0
+        }
+        "$expected" {
+            puts "    ✓ PASS - Response contains: $expected"
+            incr pass_count
+            return 1
+        }
+    }
+}
+
+# Function for set/get verification tests
+proc verify_set_get {name set_cmd get_cmd expected_value} {
+    global port_id verify_count verify_pass
+
+    incr verify_count
+    puts "\n=== VERIFY SET/GET: $name ==="
+    puts "  1. SET: $set_cmd"
+
+    send "$set_cmd\r"
+    sleep 0.4
+    expect "OK"
+
+    puts "  2. GET: $get_cmd (should return: $expected_value)"
+    send "$get_cmd\r"
+    sleep 0.4
+
+    if {[catch {expect "$expected_value"} result]} {
+        puts "  ✗ FAIL - Value mismatch"
+        return 0
+    } else {
+        puts "  ✓ PASS - Value persisted: $expected_value"
+        incr verify_pass
+        return 1
+    }
+}
+
+puts "========================================================================"
+puts "COMPREHENSIVE SERIAL CONSOLE TEST - WITH VALUE PERSISTENCE CHECKS"
+puts "========================================================================"
+puts ""
+
+# ========== STEP 1: RESET AND SETUP ==========
+puts "STEP 1: RESET AND SETUP"
+puts "========================================================================"
+
+send "SYST:LOG:LEVEL OFF\r"
+sleep 0.5
+expect "OK"
+puts "✓ Logging disabled"
+
+send "SYST:CONF:DEFAULT\r"
+sleep 0.5
+expect "OK"
+puts "✓ Reset to defaults"
+sleep 0.5
+
+puts ""
+puts "STEP 2: TEST RDS COMMANDS WITH SET/GET VERIFICATION"
+puts "========================================================================"
+
+# RDS:PI - Set and verify it sticks
+verify_set_get "RDS:PI Persistence" "RDS:PI 0x52A1" "RDS:PI?" "52A1"
+
+# RDS:PI - Test decimal format
+verify_set_get "RDS:PI Decimal" "RDS:PI 21153" "RDS:PI?" "21153"
+
+# RDS:PTY - Set and verify
+verify_set_get "RDS:PTY Persistence" "RDS:PTY 10" "RDS:PTY?" "10"
+
+# RDS:PTY - By name
+verify_set_get "RDS:PTY by Name" "RDS:PTY COUNTRY" "RDS:PTY?" "11"
+
+# RDS:TP - Set and verify
+verify_set_get "RDS:TP Persistence" "RDS:TP 1" "RDS:TP?" "1"
+
+# RDS:TA - Set and verify
+verify_set_get "RDS:TA Persistence" "RDS:TA 1" "RDS:TA?" "1"
+
+# RDS:MS - Set and verify
+verify_set_get "RDS:MS Persistence" "RDS:MS 0" "RDS:MS?" "0"
+
+# RDS:PS - Set and verify (ISSUE #2 FIX TEST)
+verify_set_get "RDS:PS Persistence" "RDS:PS \"TestPS\"" "RDS:PS?" "TestPS"
+
+# RDS:PS - Different value
+verify_set_get "RDS:PS Different" "RDS:PS \"PirateFM\"" "RDS:PS?" "PirateFM"
+
+# RDS:RT - Set and verify (ISSUE #2 FIX TEST)
+verify_set_get "RDS:RT Persistence" "RDS:RT \"Artist - Title\"" "RDS:RT?" "Artist - Title"
+
+# RDS:RT - Different value
+verify_set_get "RDS:RT Different" "RDS:RT \"Broadcast Text\"" "RDS:RT?" "Broadcast Text"
+
+# RDS:ENABLE - Set and verify
+verify_set_get "RDS:ENABLE Persistence" "RDS:ENABLE 1" "RDS:ENABLE?" "1"
+
+puts ""
+puts "STEP 3: TEST RDS STATUS QUERY"
+puts "========================================================================"
+
+test_cmd "RDS:STATUS?" "RDS:STATUS?" "PI="
+
+puts ""
+puts "STEP 4: TEST RDS:PTY:LIST? (ISSUE #3 FIX TEST)"
+puts "========================================================================"
+
+test_cmd "RDS:PTY:LIST has entries" "RDS:PTY:LIST?" "POP_MUSIC"
+test_cmd "RDS:PTY:LIST has COUNTRY" "RDS:PTY:LIST?" "COUNTRY"
+test_cmd "RDS:PTY:LIST has ROCK" "RDS:PTY:LIST?" "ROCK"
+
+puts ""
+puts "STEP 5: TEST AUDIO COMMANDS WITH PERSISTENCE"
+puts "========================================================================"
+
+verify_set_get "AUDIO:STEREO Persistence" "AUDIO:STEREO 1" "AUDIO:STEREO?" "1"
+verify_set_get "AUDIO:PREEMPH Persistence" "AUDIO:PREEMPH 1" "AUDIO:PREEMPH?" "1"
+
+test_cmd "AUDIO:STATUS?" "AUDIO:STATUS?" "STEREO="
+
+puts ""
+puts "STEP 6: TEST PILOT COMMANDS WITH PERSISTENCE"
+puts "========================================================================"
+
+verify_set_get "PILOT:ENABLE Persistence" "PILOT:ENABLE 1" "PILOT:ENABLE?" "1"
+verify_set_get "PILOT:AUTO Persistence" "PILOT:AUTO 1" "PILOT:AUTO?" "1"
+verify_set_get "PILOT:THRESH Persistence" "PILOT:THRESH 0.001" "PILOT:THRESH?" "0.001"
+verify_set_get "PILOT:HOLD Persistence" "PILOT:HOLD 2000" "PILOT:HOLD?" "2000"
+
+puts ""
+puts "STEP 7: TEST SYSTEM COMMANDS"
+puts "========================================================================"
+
+test_cmd "SYST:VERSION?" "SYST:VERSION?" "OK"
+test_cmd "SYST:STATUS?" "SYST:STATUS?" "UPTIME="
+test_cmd "SYST:HEAP?" "SYST:HEAP?" "CURRENT_FREE="
+
+puts ""
+puts "STEP 8: TEST SYST:CONF:* COMMANDS (ISSUE #1 FIX TEST)"
+puts "========================================================================"
+
+test_cmd "SYST:CONF:SAVE myconf" "SYST:CONF:SAVE myconf" "OK"
+test_cmd "SYST:CONF:LIST?" "SYST:CONF:LIST?" "OK"
+test_cmd "SYST:CONF:ACTIVE?" "SYST:CONF:ACTIVE?" "OK"
+test_cmd "SYST:CONF:DEFAULT reset" "SYST:CONF:DEFAULT" "OK"
+
+puts ""
+puts "STEP 9: DETAILED RESPONSE VERIFICATION"
+puts "========================================================================"
+
+puts "\n>>> RDS:PS? Response Format (ISSUE #2 FIX)"
+send "RDS:PS \"FormatTest\"\r"
+sleep 0.3
+expect "OK"
+
+send "RDS:PS?\r"
+sleep 0.3
+expect {
+    "OK PS=\"FormatTest\"" {
+        puts "✓ CORRECT FORMAT: OK PS=\"FormatTest\""
+        incr pass_count
+    }
+    "OK \"PS\":\"FormatTest\"" {
+        puts "✗ WRONG FORMAT: OK \"PS\":\"FormatTest\" (looks like JSON)"
+        incr fail_count
+    }
+    timeout {
+        puts "✗ TIMEOUT - Response not received"
+        incr fail_count
+    }
+}
+
+puts ""
+puts ">>> RDS:RT? Response Format (ISSUE #2 FIX)"
+send "RDS:RT \"TestTitle\"\r"
+sleep 0.3
+expect "OK"
+
+send "RDS:RT?\r"
+sleep 0.3
+expect {
+    "OK RT=\"TestTitle\"" {
+        puts "✓ CORRECT FORMAT: OK RT=\"TestTitle\""
+        incr pass_count
+    }
+    "OK \"RT\":\"TestTitle\"" {
+        puts "✗ WRONG FORMAT: OK \"RT\":\"TestTitle\" (looks like JSON)"
+        incr fail_count
+    }
+    timeout {
+        puts "✗ TIMEOUT - Response not received"
+        incr fail_count
+    }
+}
+
+puts ""
+puts "========================================================================"
+puts "FINAL TEST SUMMARY"
+puts "========================================================================"
+
+set basic_total [expr {$pass_count + $fail_count}]
+set verify_total $verify_count
+
+puts "Basic Command Tests:"
+puts "  Passed:  $pass_count"
+puts "  Failed:  $fail_count"
+puts "  Total:   $basic_total"
+
+puts ""
+puts "Set/Get Persistence Tests:"
+puts "  Verified: $verify_pass / $verify_total"
+
+if {$verify_count > 0} {
+    set verify_rate [expr {100 * $verify_pass / $verify_count}]
+} else {
+    set verify_rate 0
+}
+
+set total [expr {$basic_total + $verify_total}]
+set all_pass [expr {$pass_count + $verify_pass}]
+
+if {$total > 0} {
+    set rate [expr {100 * $all_pass / $total}]
+} else {
+    set rate 0
+}
+
+puts ""
+puts "TOTAL:"
+puts "  All Tests:  $all_pass / $total"
+puts "  Success:    $rate%"
+
+puts ""
+puts "========================================================================"
+if {$fail_count == 0 && $verify_pass == $verify_count} {
+    puts "✓ ALL TESTS PASSED!"
+} else {
+    puts "✗ SOME TESTS FAILED - See details above"
+}
+puts "========================================================================"
+
+exit

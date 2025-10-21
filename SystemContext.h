@@ -12,7 +12,7 @@
  * Purpose:
  *   Manages the lifecycle and dependencies of all major system components:
  *   - DSP_pipeline (audio processing core)
- *   - Log (lock-free logging)
+ *   - Console (serial CLI + log draining)
  *   - VUMeter (real-time level display)
  *   - RDSAssembler (RDS bitstream generation)
  *   - Hardware drivers (I2S abstraction)
@@ -63,7 +63,7 @@ class DSP_pipeline;
  * Initialization Order Enforcement:
  *   initialize() enforces a strict startup sequence to prevent race conditions:
  *   1. Hardware driver (injected dependency)
- *   2. Logger task (all downstream modules use logging)
+ *   2. Console task (single Serial owner + log draining)
  *   3. VU Meter task
  *   4. RDS Assembler task (if enabled)
  *   5. DSP Pipeline task (highest priority, last to start)
@@ -96,7 +96,7 @@ class SystemContext
      *
      * Starts all major system components in the correct order:
      * 1. Hardware driver initialization
-     * 2. Logger task startup (Core 1)
+     * 2. Console task startup (Core 1)
      * 3. VU Meter task startup (Core 1)
      * 4. RDS Assembler task startup (Core 1)
      * 5. DSP Pipeline task startup (Core 0)

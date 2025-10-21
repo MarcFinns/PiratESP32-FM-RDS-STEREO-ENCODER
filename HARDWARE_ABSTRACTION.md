@@ -130,7 +130,7 @@ if (!AudioIO::setupRx()) { /* error */ }
 **New code:**
 ```cpp
 if (!hardware_driver_->initialize()) {
-    Log::enqueue(Log::ERROR, "Hardware initialization failed!");
+    Console::enqueue(LogLevel::ERROR, "Hardware initialization failed!");
     return false;
 }
 ```
@@ -220,7 +220,7 @@ dsp.process(); // Process mock audio data
 Current:
 ```cpp
 if (ret != ESP_OK) {
-    Log::enqueuef(Log::ERROR, "Read error: %d", ret);
+    Console::enqueuef(LogLevel::ERROR, "Read error: %d", ret);
 }
 ```
 

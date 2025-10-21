@@ -32,7 +32,7 @@ setup() calls SystemContext::initialize()
   ├─ Step 1: Validate & init Hardware Driver
   |          (I2S, DMA, GPIO setup)
   |
-  ├─ Step 2: Start Logger task (Core 1, priority 2)
+  ├─ Step 2: Start Console task (Core 1, priority 2)
   |          (Logging available for all downstream modules)
   |
   ├─ Step 3: Start VU Meter task (Core 0, priority 1)
@@ -152,31 +152,31 @@ bool SystemContext::initialize(
 {
     // Validate hardware driver
     if (hardware_driver == nullptr) {
-        Log::enqueuef(LogLevel::ERROR, "hardware_driver is nullptr");
+        Console::enqueuef(LogLevel::ERROR, "hardware_driver is nullptr");
         return false;
     }
 
     // Step 1: Initialize Hardware
     if (!hardware_driver_->initialize()) {
-        Log::enqueuef(LogLevel::ERROR, "Hardware init failed");
+        Console::enqueuef(LogLevel::ERROR, "Hardware init failed");
         return false;
     }
 
-    // Step 2: Start Logger (Core 1, priority 2)
-    if (!Log::startTask(1, 2, 4096, 128)) {
-        Log::enqueuef(LogLevel::ERROR, "Logger start failed");
+    // Step 2: Start Console (Core 1, priority 2)
+    if (!Console::startTask(1, 2, 4096, 128)) {
+        Console::enqueuef(LogLevel::ERROR, "Console start failed");
         return false;
     }
 
     // Step 3: Start VU Meter (Core 0, priority 1)
     if (!VUMeter::startTask(0, 1, 4096, 1)) {
-        Log::enqueuef(LogLevel::WARN, "VUMeter start failed (non-critical)");
+        Console::enqueuef(LogLevel::WARN, "VUMeter start failed (non-critical)");
     }
 
     // Step 4: Start RDS Assembler (Core 1, priority 1) if enabled
     if (enable_rds) {
         if (!RDSAssembler::startTask(1, 1, 4096, 1024)) {
-            Log::enqueuef(LogLevel::WARN, "RDSAssembler start failed (non-critical)");
+            Console::enqueuef(LogLevel::WARN, "RDSAssembler start failed (non-critical)");
         }
     }
 
@@ -187,7 +187,7 @@ bool SystemContext::initialize(
             dsp_core_id,
             dsp_priority,
             dsp_stack_words)) {
-        Log::enqueuef(LogLevel::ERROR, "DSP Pipeline start failed");
+        Console::enqueuef(LogLevel::ERROR, "DSP Pipeline start failed");
         delete dsp_pipeline_;
         return false;
     }
@@ -232,7 +232,7 @@ All modules receive:
 
 **Example:**
 ```cpp
-Log::startTask(
+Console::startTask(
     1,      // core_id: Core 1 (I/O core)
     2,      // priority: Medium priority
     4096,   // stack_words: 4 KB
@@ -303,7 +303,7 @@ system.initialize(
 
 ### Log Module
 ```cpp
-Log::startTask(
+Console::startTask(
     core_id=1,          // Core 1 (I/O core)
     priority=2,         // Medium priority
     stack_words=4096,   // 4 KB stack
@@ -344,7 +344,7 @@ DSP_pipeline::startTask(
 ### Initialization Sequence (setup phase)
 
 1. **Hardware Ready**: I2S, DMA, GPIO configured
-2. **Logger Running**: All diagnostics available
+2. **Console Running**: All diagnostics available
 3. **Display Running**: Visual feedback available
 4. **RDS Running**: Bitstream generation active
 5. **Audio Running**: Real-time processing starts
@@ -354,7 +354,7 @@ DSP_pipeline::startTask(
 1. **Audio Stops**: DSP pipeline stopped first
 2. **RDS Stops**: Bitstream generation stops
 3. **Display Stops**: Visual feedback stops
-4. **Logger Stops**: Diagnostics stop (last)
+4. **Console Stops**: Diagnostics stop (last)
 5. **Hardware Stops**: I2S/DMA shutdown
 
 ---
@@ -364,7 +364,7 @@ DSP_pipeline::startTask(
 ### Critical Failures (Stop Initialization)
 
 - Hardware driver initialization
-- Logger task creation
+- Console task creation
 - DSP pipeline task creation
 
 ### Non-Critical Failures (Continue Initializing)
@@ -375,14 +375,14 @@ DSP_pipeline::startTask(
 ### Example:
 ```cpp
 // Critical - stops initialization
-if (!Log::startTask(...)) {
-    Log::enqueuef(LogLevel::ERROR, "Failed to start Logger task");
+if (!Console::startTask(...)) {
+    Console::enqueuef(LogLevel::ERROR, "Failed to start Console task");
     return false;  // STOP
 }
 
 // Non-critical - continues initialization
 if (!VUMeter::startTask(...)) {
-    Log::enqueuef(LogLevel::WARN, "Failed to start VUMeter task (non-critical)");
+    Console::enqueuef(LogLevel::WARN, "Failed to start VUMeter task (non-critical)");
     // Continue without error
 }
 ```
@@ -405,7 +405,7 @@ uint32_t uptime = system.getUptimeSeconds();
 // Get health status (bitmask)
 uint32_t health = system.getHealthStatus();
 // Bit 0: Hardware ready
-// Bit 1: Logger healthy
+// Bit 1: Console healthy
 // Bit 2: VU Meter alive
 // Bit 3: RDS Assembler alive
 // Bit 4: DSP Pipeline alive
@@ -493,4 +493,3 @@ The implementation maintains backward compatibility while providing a clean, tes
 
 **Status:** ✅ COMPLETE and VERIFIED
 **Compilation:** ✅ 0 errors, 33% storage
-

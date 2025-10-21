@@ -20,7 +20,7 @@
 #include "DSP_pipeline.h"
 #include "ErrorHandler.h"
 #include "IHardwareDriver.h"
-#include "Log.h"
+#include "Console.h"
 #include "RDSAssembler.h"
 #include "DisplayManager.h"
 
@@ -92,7 +92,7 @@ SystemContext::~SystemContext()
  *
  * 1. Validate hardware driver (required)
  * 2. Initialize hardware driver (I2S setup, DMA, etc.)
- * 3. Start Logger task (Core 1) - needed for all downstream diagnostics
+ * 3. Start Console task (Core 1) - Serial owner; drains logs and handles CLI
  * 4. Start VU Meter task (Core 0) - display feedback
  * 5. Start RDS Assembler task (Core 1) if enabled - RDS bitstream generation
  * 6. Start DSP Pipeline task (Core 0) - audio processing (highest priority)
@@ -125,37 +125,37 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     // Validate inputs
     if (hardware_driver == nullptr)
     {
-        Log::enqueuef(LogLevel::ERROR, "SystemContext::initialize() - hardware_driver is nullptr");
+        Console::enqueuef(LogLevel::ERROR, "SystemContext::initialize() - hardware_driver is nullptr");
         return false;
     }
 
     if (is_initialized_)
     {
-        Log::enqueuef(LogLevel::WARN, "SystemContext::initialize() - already initialized");
+        Console::enqueuef(LogLevel::WARN, "SystemContext::initialize() - already initialized");
         return false;
     }
 
     hardware_driver_ = hardware_driver;
 
-    // ---- Step 1: Start Logger Task (first) ----
-    // Logger must be started early so downstream modules can log
+    // ---- Step 1: Start Console Task (first) ----
+    // Console must be started early so downstream modules can log
     // Priority 2: Medium, higher than VU meter and RDS
-    if (!Log::startTask(Config::LOGGER_CORE,        // core_id
-                        Config::LOGGER_PRIORITY,    // priority
-                        Config::LOGGER_STACK_WORDS, // stack_words
-                        Config::LOGGER_QUEUE_LEN))  // queue_len
+    if (!Console::startTask(Config::CONSOLE_CORE,        // core_id
+                        Config::CONSOLE_PRIORITY,    // priority
+                        Config::CONSOLE_STACK_WORDS, // stack_words
+                        Config::CONSOLE_QUEUE_LEN))  // queue_len
     {
-        Serial.println("Failed to start Logger task");
+        Serial.println("Failed to start Console task");
         return false;
     }
 
-    Log::enqueuef(LogLevel::INFO, "Logger task started on Core %d", Config::LOGGER_CORE);
+    Console::enqueuef(LogLevel::INFO, "Console task started on Core %d", Config::CONSOLE_CORE);
 
     // Wait briefly for logger to become ready (queue created, begin() finished)
     {
         const int max_wait_ms = 200;
         int waited = 0;
-        while (!Log::isReady() && waited < max_wait_ms)
+        while (!Console::isReady() && waited < max_wait_ms)
         {
             vTaskDelay(pdMS_TO_TICKS(1));
             waited += 1;
@@ -176,7 +176,7 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
         return false;
     }
 
-    Log::enqueuef(LogLevel::INFO, "Hardware driver initialized");
+    Console::enqueuef(LogLevel::INFO, "Hardware driver initialized");
 
     // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging
@@ -185,12 +185,12 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
                                    Config::VU_STACK_WORDS,  // stack_words
                                    Config::VU_QUEUE_LEN))   // queue_len (mailbox)
     {
-        Log::enqueuef(LogLevel::WARN, "Failed to start DisplayManager task (non-critical)");
+        Console::enqueuef(LogLevel::WARN, "Failed to start DisplayManager task (non-critical)");
         // Non-critical failure - continue initialization
     }
     else
     {
-        Log::enqueuef(LogLevel::INFO, "Display Manager task started on Core %d", Config::VU_CORE);
+        Console::enqueuef(LogLevel::INFO, "Display Manager task started on Core %d", Config::VU_CORE);
     }
 
     // ---- Step 4: Start RDS Assembler Task (Core 1) if Enabled ----
@@ -201,14 +201,20 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
                                      Config::RDS_STACK_WORDS,  // stack_words
                                      Config::RDS_BIT_QUEUE_LEN)) // queue_len: bits
         {
-            Log::enqueuef(LogLevel::WARN, "Failed to start RDSAssembler task (non-critical)");
+            Console::enqueuef(LogLevel::WARN, "Failed to start RDSAssembler task (non-critical)");
             // Non-critical failure - continue without RDS
         }
         else
         {
-            Log::enqueuef(LogLevel::INFO, "RDS Assembler task started on Core %d", Config::RDS_CORE);
+            Console::enqueuef(LogLevel::INFO, "RDS Assembler task started on Core %d", Config::RDS_CORE);
         }
     }
+
+    // ---- Step 4.5: Load Last Configuration (or defaults) ----
+    // Load the last saved configuration from NVS if available
+    // Otherwise use factory defaults with PS="PiratESP" and RT="Hello from ESP32 FM Stereo RDS encoder!"
+    extern void Console_LoadLastConfiguration();
+    Console_LoadLastConfiguration();
 
     // ---- Step 5: Start DSP Pipeline Task (Core 0) ----
     // CRITICAL: This must start last and run on Core 0 with highest priority
@@ -220,20 +226,28 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
             dsp_priority,     // priority: Highest (typically 6 for real-time audio)
             dsp_stack_words)) // stack_words: 12KB typical
     {
-        Log::enqueuef(LogLevel::ERROR, "Failed to start DSP Pipeline task");
+        Console::enqueuef(LogLevel::ERROR, "Failed to start DSP Pipeline task");
         delete dsp_pipeline_;
         dsp_pipeline_ = nullptr;
         return false;
     }
 
-    Log::enqueuef(LogLevel::INFO, "DSP Pipeline task started on Core %d with priority %d",
+    Console::enqueuef(LogLevel::INFO, "DSP Pipeline task started on Core %d with priority %d",
                   dsp_core_id, dsp_priority);
+
+    // Wait briefly for all tasks to emit their startup messages
+    // This ensures DisplayManager, RDSAssembler, and DSP_pipeline can log before startup phase ends
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Signal that startup phase is complete
+    // After this, if LOG_LEVEL=OFF, periodic logs will be suppressed
+    Console::markStartupComplete();
 
     // ---- Initialization Complete ----
     is_initialized_ = true;
     init_time_us_ = esp_timer_get_time();
 
-    Log::enqueuef(LogLevel::INFO, "SystemContext initialized - all modules running");
+    Console::enqueuef(LogLevel::INFO, "SystemContext initialized - all modules running");
 
     return true;
 }
@@ -249,7 +263,7 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
  * 1. Stop DSP Pipeline (Core 0) - high priority, must stop first
  * 2. Stop RDS Assembler (Core 1)
  * 3. Stop VU Meter (Core 1)
- * 4. Stop Logger (Core 1) - must stop last so we can log shutdown progress
+ * 4. Stop Console (Core 1) - must stop last so we can log shutdown progress
  * 5. Shutdown hardware driver
  *
  * This reverse order ensures:
@@ -269,7 +283,7 @@ void SystemContext::shutdown()
         return; // Already shutdown or never initialized
     }
 
-    Log::enqueuef(LogLevel::INFO, "SystemContext shutdown initiated");
+    Console::enqueuef(LogLevel::INFO, "SystemContext shutdown initiated");
 
     // ---- Step 1: Stop DSP Pipeline (Core 0) ----
     if (dsp_pipeline_ != nullptr)
@@ -278,21 +292,21 @@ void SystemContext::shutdown()
         // For now, we delete the instance (task will be cleaned up by FreeRTOS).
         delete dsp_pipeline_;
         dsp_pipeline_ = nullptr;
-        Log::enqueuef(LogLevel::INFO, "DSP Pipeline stopped");
+        Console::enqueuef(LogLevel::INFO, "DSP Pipeline stopped");
     }
 
     // ---- Step 2: Stop RDS Assembler (Core 1) ----
     // Note: RDSAssembler::stopTask() needs to be implemented
     // For now, this is a placeholder for future task shutdown logic
-    Log::enqueuef(LogLevel::INFO, "RDS Assembler stopped");
+    Console::enqueuef(LogLevel::INFO, "RDS Assembler stopped");
 
     // ---- Step 3: Stop VU Meter (Core 1) ----
     DisplayManager::stopTask();
-    Log::enqueuef(LogLevel::INFO, "Display Manager stopped");
+    Console::enqueuef(LogLevel::INFO, "Display Manager stopped");
 
-    // ---- Step 4: Stop Logger (Core 1) - Last ----
-    Log::enqueuef(LogLevel::INFO, "SystemContext shutdown complete");
-    // Note: Log::stopTask() needs to be implemented
+    // ---- Step 4: Stop Console (Core 1) - Last ----
+    Console::enqueuef(LogLevel::INFO, "SystemContext shutdown complete");
+    // Note: Console::stopTask() needs to be implemented
     // For now, this is a placeholder for future task shutdown logic
 
     // ---- Step 5: Shutdown Hardware Driver ----
@@ -338,7 +352,7 @@ uint32_t SystemContext::getUptimeSeconds() const
  *
  * Health Indicators:
  *   Bit 0: Hardware driver ready
- *   Bit 1: Logger queue healthy (not dropping messages)
+ *   Bit 1: Console queue healthy (not dropping messages)
  *   Bit 2: VU Meter task alive
  *   Bit 3: RDS Assembler task alive
  *   Bit 4: DSP Pipeline task alive

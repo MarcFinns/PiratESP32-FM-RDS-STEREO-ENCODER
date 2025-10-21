@@ -14,7 +14,7 @@ The ESP32's dual-core architecture is exploited to maximize real-time performanc
   - DSP Pipeline (audio input, stereo processing, FM modulation, RDS injection)
 
 - **Core 1 (APP_CPU, typical default)**: I/O and background tasks
-  - Logger (serial output, diagnostics)
+  - Console (serial CLI owner + diagnostics)
   - VU Meter (level monitoring, display updates)
   - RDS Assembler (metadata formatting, timing)
 
@@ -29,7 +29,7 @@ FreeRTOS task priorities range from 0 (lowest) to 25 (highest). The system uses 
 | DSP Pipeline | 6 | 0 | Highest priority for real-time audio processing with <1ms latency requirements |
 | RDS Assembler | 5 | 1 | Time-sensitive RDS data formatting (57kHz subcarrier timing) |
 | VU Meter | 4 | 1 | Regular level monitoring without audio dropouts |
-| Logger | 3 | 1 | Background diagnostic output, lowest priority to avoid blocking |
+| Console | 3 | 1 | Background diagnostic output, lowest priority to avoid blocking |
 
 **Note**: Priority 6 is the highest used to reserve headroom for potential FreeRTOS system tasks and interrupt handlers.
 
@@ -63,20 +63,20 @@ Hardware Layer (initialized first)
     +-- GPIO (controls, LEDs)
     |
     v
-Logger Service
+Console Service
     |
     v
 VU Meter Service
     |   |
-    |   +-- Requires: Logger (for debug output)
+    |   +-- Requires: Console (for debug output)
     v
 RDS Assembler Service
     |   |
-    |   +-- Requires: Logger (for diagnostics)
+    |   +-- Requires: Console (for diagnostics)
     v
 DSP Pipeline
     |
-    +-- Requires: Logger (for performance metrics)
+    +-- Requires: Console (for performance metrics)
     +-- Requires: VU Meter (for level monitoring)
     +-- Requires: RDS Assembler (for metadata injection)
 ```
@@ -86,22 +86,22 @@ DSP Pipeline
 Dependencies are injected via constructor parameters, ensuring explicit coupling:
 
 ```cpp
-// Example: VU Meter depends on Logger
-VUMeter::VUMeter(Logger* logger, const VUConfig& config)
-    : logger_(logger), config_(config) {
+// Example: VU Meter depends on Console
+VUMeter::VUMeter(Console* console, const VUConfig& config)
+    : console_(console), config_(config) {
     // Validation
-    if (!logger_) {
-        // Cannot proceed without logger
+    if (!console_) {
+        // Cannot proceed without console
     }
 }
 
 // Example: DSP Pipeline depends on multiple services
 DSPPipeline::DSPPipeline(
-    Logger* logger,
+    Console* console,
     VUMeter* vuMeter,
     RDSAssembler* rdsAssembler,
     const DSPConfig& config)
-    : logger_(logger),
+    : console_(console),
       vuMeter_(vuMeter),
       rdsAssembler_(rdsAssembler),
       config_(config) {
@@ -135,10 +135,10 @@ The startup sequence is carefully orchestrated to prevent race conditions and en
 
 Services are initialized in dependency order:
 
-1. **Logger Service**
+1. **Console Service**
    ```cpp
-   logger = new Logger(config.logLevel, config.serialBaud);
-   logger->init();  // Start serial output, create task on Core 1
+   Console* console = new Console();
+   console->init();  // Start serial output, create task on Core 1
    ```
    - Creates FreeRTOS task on Core 1, Priority 3
    - Initializes queue (depth: 32 messages)
@@ -146,30 +146,30 @@ Services are initialized in dependency order:
 
 2. **VU Meter Service**
    ```cpp
-   vuMeter = new VUMeter(logger, config.vuConfig);
+   vuMeter = new VUMeter(console, config.vuConfig);
    vuMeter->init();  // Create task on Core 1
    ```
-   - Depends on: Logger
+   - Depends on: Console
    - Creates FreeRTOS task on Core 1, Priority 4
    - Initializes mailbox queue (depth: 1 message)
    - Begins level monitoring thread
 
 3. **RDS Assembler Service**
    ```cpp
-   rdsAssembler = new RDSAssembler(logger, config.rdsConfig);
+   rdsAssembler = new RDSAssembler(console, config.rdsConfig);
    rdsAssembler->init();  // Create task on Core 1
    ```
-   - Depends on: Logger
+   - Depends on: Console
    - Creates FreeRTOS task on Core 1, Priority 5
    - Initializes FIFO queue (depth: 16 messages)
    - Begins RDS data formatting thread
 
 4. **DSP Pipeline**
    ```cpp
-   dspPipeline = new DSPPipeline(logger, vuMeter, rdsAssembler, config.dspConfig);
+   dspPipeline = new DSPPipeline(console, vuMeter, rdsAssembler, config.dspConfig);
    dspPipeline->init();  // Create task on Core 0
    ```
-   - Depends on: Logger, VU Meter, RDS Assembler
+   - Depends on: Console, VU Meter, RDS Assembler
    - Creates FreeRTOS task on Core 0, Priority 6 (highest)
    - Initializes audio buffers
    - Begins real-time audio processing loop
@@ -180,7 +180,7 @@ Once all services are initialized:
 
 ```cpp
 void SystemContext::start() {
-    logger->start();        // Unblock logger task
+    console->start();        // Unblock console task
     vuMeter->start();       // Unblock VU meter task
     rdsAssembler->start();  // Unblock RDS task
     dspPipeline->start();   // Unblock DSP task (starts audio flow)
@@ -249,13 +249,13 @@ void SystemContext::shutdown() {
     dspPipeline->stop();      // Stop audio first
     rdsAssembler->stop();
     vuMeter->stop();
-    logger->stop();
+    console->stop();
 
     // Clean up resources
     delete dspPipeline;
     delete rdsAssembler;
     delete vuMeter;
-    delete logger;
+    delete console;
 }
 ```
 
@@ -263,7 +263,7 @@ void SystemContext::shutdown() {
 
 Different modules use different queue semantics based on their requirements:
 
-### Logger Queue: FIFO with Drop-on-Overflow
+### Console Log Queue: FIFO with Drop-on-Overflow
 
 ```cpp
 QueueHandle_t logQueue = xQueueCreate(32, sizeof(LogMessage));
@@ -274,7 +274,7 @@ if (xQueueSend(logQueue, &msg, 0) != pdTRUE) {
     droppedMessageCount++;
 }
 
-// Consumer (logger task)
+// Consumer (console task)
 LogMessage msg;
 if (xQueueReceive(logQueue, &msg, portMAX_DELAY) == pdTRUE) {
     Serial.println(msg.text);
@@ -326,17 +326,17 @@ if (xQueueReceive(rdsQueue, &data, 0) == pdTRUE) {
 ```cpp
 bool SystemContext::init() {
     if (!initHardware()) {
-        logger->error("Hardware init failed");
+        console->error("Hardware init failed");
         return false;
     }
 
-    if (!logger->init()) {
-        Serial.println("FATAL: Logger init failed");
+    if (!console->init()) {
+        Serial.println("FATAL: Console init failed");
         return false;
     }
 
     if (!vuMeter->init()) {
-        logger->error("VU Meter init failed");
+        console->error("VU Meter init failed");
         return false;
     }
 
@@ -355,7 +355,7 @@ Runtime errors are logged and may trigger fallback behavior:
 ```cpp
 void DSPPipeline::processAudio() {
     if (!i2sReadSamples(buffer, bufferSize)) {
-        logger->error("I2S read failed, using silence");
+        console->error("I2S read failed, using silence");
         memset(buffer, 0, bufferSize);
     }
 
@@ -438,7 +438,7 @@ To add a new service to the system:
 - **Task monitoring**: Use `vTaskList()` to inspect all tasks
 - **Queue monitoring**: Use `uxQueueMessagesWaiting()` to detect bottlenecks
 - **Performance profiling**: Use `esp_timer_get_time()` for microsecond timing
-- **Logger levels**: Use DEBUG level for verbose output, ERROR for critical issues
+- **Console levels**: Use DEBUG level for verbose output, ERROR for critical issues
 
 ## Summary
 
@@ -447,7 +447,7 @@ The PiratESP32 system architecture achieves reliable real-time audio processing 
 - **Deterministic task allocation**: Core 0 for audio, Core 1 for I/O
 - **Priority-based scheduling**: Highest priority for time-critical DSP
 - **Dependency injection**: Clear module boundaries and testability
-- **Ordered initialization**: Hardware → Logger → VU → RDS → DSP
+- **Ordered initialization**: Hardware → Console → VU → RDS → DSP
 - **Appropriate queue semantics**: Drop, mailbox, or blocking based on requirements
 - **Centralized lifecycle management**: SystemContext IoC container
 

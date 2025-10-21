@@ -17,7 +17,7 @@
 
 #include "ESP32I2SDriver.h"
 #include "I2SDriver.h" // AudioIO namespace (existing I2S setup code)
-#include "Log.h"
+#include "Console.h"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
@@ -64,14 +64,14 @@ bool ESP32I2SDriver::initialize()
 {
     if (is_initialized_)
     {
-        Log::enqueue(LogLevel::WARN, "ESP32I2SDriver already initialized");
+        Console::enqueue(LogLevel::WARN, "ESP32I2SDriver already initialized");
         return true;
     }
 
     // Initialize TX first (establishes MCLK)
     if (!initializeTx())
     {
-        Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: TX initialization failed");
+        Console::enqueue(LogLevel::ERROR, "ESP32I2SDriver: TX initialization failed");
         is_initialized_ = false;
         last_error_ = ESP_FAIL;
         last_driver_error_ = DriverError::IoError;
@@ -84,7 +84,7 @@ bool ESP32I2SDriver::initialize()
     // Initialize RX (uses MCLK from TX)
     if (!initializeRx())
     {
-        Log::enqueue(LogLevel::ERROR, "ESP32I2SDriver: RX initialization failed");
+        Console::enqueue(LogLevel::ERROR, "ESP32I2SDriver: RX initialization failed");
         shutdownTx();
         is_initialized_ = false;
         last_error_ = ESP_FAIL;
@@ -95,7 +95,7 @@ bool ESP32I2SDriver::initialize()
     is_initialized_ = true;
     last_error_ = 0;
     last_driver_error_ = DriverError::None;
-    Log::enqueue(LogLevel::INFO, "ESP32I2SDriver initialized successfully");
+    Console::enqueue(LogLevel::INFO, "ESP32I2SDriver initialized successfully");
     return true;
 }
 
@@ -110,7 +110,7 @@ void ESP32I2SDriver::shutdown()
     shutdownTx();
 
     is_initialized_ = false;
-    Log::enqueue(LogLevel::INFO, "ESP32I2SDriver shut down");
+    Console::enqueue(LogLevel::INFO, "ESP32I2SDriver shut down");
 }
 
 bool ESP32I2SDriver::read(int32_t *buffer, std::size_t buffer_bytes, std::size_t &bytes_read,

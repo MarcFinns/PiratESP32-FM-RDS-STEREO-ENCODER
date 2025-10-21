@@ -151,10 +151,10 @@ Core assignments are configurable at build time via `Config.h`. The typical defa
 Config parameters controlling pinning and priorities:
 ```
 // Core selection (0 or 1)
-LOGGER_CORE, VU_CORE, RDS_CORE, DSP_CORE
+CONSOLE_CORE, VU_CORE, RDS_CORE, DSP_CORE
 // Priorities and stacks
-LOGGER_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
-LOGGER_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
+CONSOLE_PRIORITY, VU_PRIORITY, RDS_PRIORITY, DSP_PRIORITY
+CONSOLE_STACK_WORDS, VU_STACK_WORDS, RDS_STACK_WORDS, DSP_STACK_WORDS
 ```
 
 Runtime verification: at startup each module logs its actual core ("… running on Core X"). The status panel CPU metrics also reflect the real assignment.
@@ -200,7 +200,7 @@ xQueueCreate(1024, sizeof(uint8_t));
 // Hardware driver returns bool
 if (!hardware_driver_->read(buffer, len, bytes_read)) {
     int err = hardware_driver_->getErrorStatus();
-    Log::enqueuef(Log::ERROR, "Read error: %d", err);
+    Console::enqueuef(LogLevel::ERROR, "Read error: %d", err);
     ++stats_.errors;
     return;  // Skip this cycle
 }
@@ -455,7 +455,7 @@ int result = complex_calculation();  // Why this formula?
 ```cpp
 if (!operation()) {
     int err = getErrorStatus();
-    Log::enqueuef(Log::ERROR, "Operation failed: %d", err);
+    Console::enqueuef(LogLevel::ERROR, "Operation failed: %d", err);
     stats_.errors++;
     return;  // Or retry/recover
 }

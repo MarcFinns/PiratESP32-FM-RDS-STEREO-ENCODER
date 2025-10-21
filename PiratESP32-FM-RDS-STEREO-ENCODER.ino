@@ -22,20 +22,20 @@
  *     • Must maintain strict timing for glitch-free audio
  *
  *   CORE 1 (Non-Real-Time):
- *     • Logger task (priority 2)
+ *     • Console task (priority 2)
  *     • VU Meter task (priority 1)
  *     • Handles serial output and display rendering
  *     • Cannot interrupt audio processing
  *
  * Task Priorities:
  *   Priority 6: DSP_pipeline  (highest - real-time audio)
- *   Priority 2: Logger       (medium - diagnostics)
+ *   Priority 2: Console      (medium - CLI + diagnostics)
  *   Priority 1: VU Meter     (low - visual feedback)
  *   Priority 0: Idle         (system idle task)
  *
  * Memory Allocation:
  *   DSP_pipeline: 12,288 bytes stack (complex DSP operations)
- *   Logger:       4,096 bytes stack (string formatting)
+ *   Console:      4,096 bytes stack (string formatting)
  *   VU Meter:     4,096 bytes stack (graphics rendering)
  *
  * Signal Flow:
@@ -44,49 +44,21 @@
  *   3. DSP pipeline: pre-emphasis → notch → upsample → MPX synthesis
  *   4. Output via I2S TX (192 kHz stereo)
  *   5. VU meters display real-time levels on ILI9341 TFT
- *   6. Logger outputs diagnostics to Serial (115200 baud)
+ *   6. Console handles CLI and outputs diagnostics to Serial (115200 baud)
  *
  * =====================================================================================
  */
 
+#include "Config.h"
+#include "Console.h"
 #include "DSP_pipeline.h"
+#include "DisplayManager.h"
 #include "ESP32I2SDriver.h"
-#include "Log.h"
 #include "RDSAssembler.h"
 #include "SystemContext.h"
-#include "DisplayManager.h"
-
-// Optional: RDS helper/demo task (Core 1)
-static void rds_demo_task(void *arg)
-{
-    (void)arg;
-    // Initial service identification
-    RDSAssembler::setPI(0x52A1);     // Example PI code
-    RDSAssembler::setPTY(10);        // PTY = Pop Music (example)
-    RDSAssembler::setTP(true);       // Traffic Program
-    RDSAssembler::setTA(false);      // No current Traffic Announcement
-    RDSAssembler::setMS(true);       // Music
-    RDSAssembler::setPS("PiratESP"); // 8 chars, padded with space
-
-    // A few rotating RadioText messages (64 chars max; padded internally)
-    static const char *kRT[] = {"Hello from ESP32 FM Stereo RDS encoder!",
-                                "Fully digital signal processing pipeline",
-                                "This is a demo RadioText. Enjoy the music!"};
-
-    const int n = sizeof(kRT) / sizeof(kRT[0]);
-    int idx = 0;
-
-    // Initial RT
-    RDSAssembler::setRT(kRT[idx]);
-    idx = (idx + 1) % n;
-
-    for (;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(30000)); // update every 30 seconds
-        RDSAssembler::setRT(kRT[idx]);    // setRT toggles A/B flag internally
-        idx = (idx + 1) % n;
-    }
-}
+#include "splashscreen.h"
+#include <Arduino_GFX_Library.h>
+#include <pgmspace.h>
 
 // ==================================================================================
 //                              ARDUINO SETUP
@@ -114,6 +86,85 @@ void setup()
     Serial.begin(115200);
     delay(100); // Allow Serial to stabilize
 
+    // ---- Optional Splash Screen (before starting tasks) ----
+    // Show a 320x240 RGB565 splash image for ~5 seconds, then continue normal init.
+    // Safe to run here because the DisplayManager has not initialized yet.
+    if (Config::VU_DISPLAY_ENABLED)
+    {
+        if (Config::TFT_BL >= 0)
+        {
+            pinMode((int)Config::TFT_BL, OUTPUT);
+            digitalWrite((int)Config::TFT_BL, HIGH);
+        }
+        Arduino_ESP32SPI *bus = new Arduino_ESP32SPI(
+            Config::TFT_DC, Config::TFT_CS, Config::TFT_SCK, Config::TFT_MOSI, GFX_NOT_DEFINED, 1);
+        Arduino_ILI9341 *gfx =
+            new Arduino_ILI9341(bus, Config::TFT_RST, Config::TFT_ROTATION, false);
+        if (gfx && gfx->begin())
+        {
+            gfx->fillScreen(0x0000);
+            // Push the PROGMEM 320xH RGB565 image line by line
+            const int splashW = 320;
+            const int splashH = Config::SPLASH_HEIGHT;
+            const int splashY0 = Config::SPLASH_TOP_Y;
+            uint16_t line[320];
+            for (int y = 0; y < splashH; ++y)
+            {
+                int drawY = splashY0 + y;
+                if (drawY < 0 || drawY >= 240)
+                    continue;
+                for (int x = 0; x < splashW; ++x)
+                    line[x] = pgm_read_word(&LOGO320[y * splashW + x]);
+                gfx->draw16bitRGBBitmap(0, drawY, line, splashW, 1);
+            }
+
+            // ---- Overlay Text ----
+            gfx->setTextWrap(false);
+            gfx->setTextColor(0xFFFF); // white
+
+            auto centerX = [](const char *s, int size) -> int
+            {
+                int w = (int)strlen(s) * 6 * size; // 6px per char at size 1
+                int x = (320 - w) / 2;
+                return x < 0 ? 0 : x;
+            };
+
+            // Title
+            const char *title = "PiratESP";
+            int title_size = 3;
+            int title_y = 10;
+            gfx->setTextSize(title_size);
+            gfx->setCursor(centerX(title, title_size), title_y);
+            gfx->print(title);
+
+            // Subtitle one line under
+            const char *subtitle = "FM MPX STEREO RDS ENCODER";
+            int sub_size = 2;
+            // Place roughly one line below title: 8 px base * title_size + small gap
+            int sub_y = title_y + (8 * title_size) + 10;
+            gfx->setTextSize(sub_size);
+            gfx->setCursor(centerX(subtitle, sub_size), sub_y);
+            gfx->print(subtitle);
+
+            // Footer: build date/time and copyright at around y=200
+            char build_line[96];
+            snprintf(build_line, sizeof(build_line), "Build: %s %s  v%s", __DATE__, __TIME__,
+                     Config::FIRMWARE_VERSION);
+            const char *copy_line = "(c) MFINI 2025";
+            int foot_size = 1;
+            int foot_y = 215;
+            gfx->setTextSize(foot_size);
+            gfx->setCursor(centerX(build_line, foot_size), foot_y);
+            gfx->print(build_line);
+            gfx->setCursor(centerX(copy_line, foot_size), foot_y + 12);
+            gfx->print(copy_line);
+            delay(7000);
+        }
+        // Clean up temporary objects (DisplayManager will re-init later)
+        delete gfx;
+        delete bus;
+    }
+
     // ---- Initialize System Context with Dependency Injection ----
     // Create and inject the hardware I/O driver
     static ESP32I2SDriver hw_driver;
@@ -124,22 +175,22 @@ void setup()
     // Initialize all system modules through the IoC container
     // This will start:
     //   1. Hardware driver (I2S initialization)
-    //   2. Logger task (Core 1, priority 2)
+    //   2. Console task (Core 1, priority 2)
     //   3. VU Meter task (Core 1, priority 1)
     //   4. RDS Assembler task (Core 1, priority 1) if enabled
     //   5. DSP Pipeline task (Core 0, priority 6)
     bool initialized =
-        system.initialize(&hw_driver,                 // Injected hardware I/O driver
-                          Config::DSP_CORE,          // dsp_core_id (from Config.h)
-                          Config::DSP_PRIORITY,      // dsp_priority (from Config.h)
-                          Config::DSP_STACK_WORDS,   // dsp_stack_words (from Config.h)
-                          Config::ENABLE_RDS_57K     // enable_rds: Enable RDS if configured
+        system.initialize(&hw_driver,              // Injected hardware I/O driver
+                          Config::DSP_CORE,        // dsp_core_id (from Config.h)
+                          Config::DSP_PRIORITY,    // dsp_priority (from Config.h)
+                          Config::DSP_STACK_WORDS, // dsp_stack_words (from Config.h)
+                          Config::ENABLE_RDS_57K   // enable_rds: Enable RDS if configured
         );
 
     if (!initialized)
     {
         // Initialization failed - log error and halt
-        Log::printOrSerial(LogLevel::ERROR, "FATAL: System initialization failed!");
+        Console::printOrSerial(LogLevel::ERROR, "FATAL: System initialization failed!");
         // In production, might implement watchdog recovery or graceful degradation
         while (true)
         {
@@ -148,19 +199,7 @@ void setup()
         }
     }
 
-    // ---- Start RDS Demo Task (Optional) ----
-    // Only spawn demo task if RDS is enabled
-    if (Config::ENABLE_RDS_57K)
-    {
-        // Spawn the RDS demo helper using Config core/priority to remain consistent
-        xTaskCreatePinnedToCore(rds_demo_task,       // Task function
-                                "rds_demo",        // Task name
-                                2048,               // Stack size in words
-                                nullptr,            // Task parameter
-                                Config::RDS_PRIORITY, // Priority (match RDS assembler)
-                                nullptr,            // Task handle (not needed)
-                                Config::RDS_CORE);  // Core ID from Config
-    }
+    // RDS parameters can now be set via the serial console (Console task)
 
     // At this point, all system modules are running and ready
     // Arduino loop() will yield to FreeRTOS scheduler

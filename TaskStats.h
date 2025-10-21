@@ -16,7 +16,7 @@
  *
  * Monitored Tasks and Cores:
  *   • Core 0 (Real-Time Audio): Runs DSP_pipeline at 48 kHz → 192 kHz conversion
- *   • Core 1 (I/O Services): Runs Logger and VUMeter tasks for display/error reporting
+ *   • Core 1 (I/O Services): Runs Console and VUMeter tasks for display/error reporting
  *   • Per-task CPU%: Relative CPU time for named tasks (audio, logger, vu)
  *   • Per-task stack: Free stack space (in 32-bit words for ESP32 FreeRTOS)
  *
@@ -34,7 +34,7 @@
  *   CPU% = (task_run_time / total_run_time) × 100
  *   On dual-core ESP32:
  *     • core0_load ≈ DSP_pipeline CPU% (should be 80–95% for normal streaming)
- *     • core1_load ≈ Logger + VUMeter + other I/O (typically 10–30%)
+ *     • core1_load ≈ Console + VUMeter + other I/O (typically 10–30%)
  *
  * Stack Watermark:
  *   Free stack space (in 32-bit words):
@@ -74,4 +74,3 @@ bool collect(float &core0_load,
              uint32_t &logger_stack_free_words,
              uint32_t &vu_stack_free_words);
 } // namespace TaskStats
-

@@ -139,7 +139,7 @@ void setup() {
 
 **Initialization Order:**
 1. Hardware driver init
-2. Logger task (Core 1, priority 2)
+2. Console task (Core 1, priority 2)
 3. VU Meter task (Core 1, priority 1)
 4. RDS Assembler task (Core 1, priority 1)
 5. DSP Pipeline task (Core 0, priority 6 - HIGHEST)
@@ -183,7 +183,7 @@ FreeRTOS Task Scheduler
    |   └-- DSP_pipeline (highest priority)
    |
    └-- Core 1 (I/O & Display)
-       ├-- Logger (priority 2)
+       ├-- Console (priority 2)
        ├-- VU Meter (priority 1)
        └-- RDS Assembler (priority 1)
 ```
@@ -421,4 +421,3 @@ All changes are local and can be committed when ready.
 **Generated:** Phase Completion Report
 **Scope:** Phases 1-6 Architecture Modernization
 **Status:** Production-Ready
-

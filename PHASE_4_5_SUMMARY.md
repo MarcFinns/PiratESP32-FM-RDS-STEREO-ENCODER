@@ -105,7 +105,7 @@
 
 2. **Real-Time vs. Non-Real-Time**
    - Core 0 (Audio): Cannot block, must complete in < 1.33 ms
-   - Core 1 (Display/Logger): Can afford I/O operations
+   - Core 1 (Display/Console): Can afford I/O operations
 
 3. **Overflow Strategies**
    - Drop Oldest: Log, RDSAssembler
@@ -278,4 +278,3 @@ Together, these phases create a professional, transparent, well-documented audio
 
 **Compilation Status:** ✅ 0 errors, 33% storage usage
 **All changes:** Local only (ready for commit when desired)
-
