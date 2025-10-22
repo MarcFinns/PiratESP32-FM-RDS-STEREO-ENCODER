@@ -247,7 +247,7 @@ class DisplayManager : public ModuleBase
      * Note: If Config::VU_DISPLAY_ENABLED is false, this function may
      *       return true but the display will not initialize.
      */
-    static bool startTask(int core_id, uint32_t priority, uint32_t stack_words,
+    static bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                           size_t queue_len = 1);
 
     /**
@@ -265,6 +265,12 @@ class DisplayManager : public ModuleBase
      *       resume VU meter operation.
      */
     static void stopTask();
+
+    /**
+     * Returns true once the display task has successfully initialized
+     * and entered its process() loop.
+     */
+    static bool isReady();
 
     /**
      * Enqueue VU Sample (Task Context)
@@ -422,7 +428,7 @@ class DisplayManager : public ModuleBase
     QueueHandle_t stats_queue_; ///< FreeRTOS queue for stats snapshots
     size_t queue_len_;          ///< Queue depth in samples
     int core_id_;               ///< FreeRTOS core ID
-    uint32_t priority_;         ///< Task priority
+    UBaseType_t priority_;      ///< Task priority
     uint32_t stack_words_;      ///< Stack size in words
 
     // Display resources (initialized in begin())
@@ -446,7 +452,7 @@ using Sample = VUSample;
 using StatsSnapshot = VUStatsSnapshot;
 
 // Delegate to class static methods
-inline bool startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len = 1)
+inline bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words, size_t queue_len = 1)
 {
     return DisplayManager::startTask(core_id, priority, stack_words, queue_len);
 }

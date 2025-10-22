@@ -129,7 +129,7 @@ DisplayManager::DisplayManager()
 //                          STATIC WRAPPER API
 // ==================================================================================
 
-bool DisplayManager::startTask(int core_id, uint32_t priority, uint32_t stack_words,
+bool DisplayManager::startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                                size_t queue_len)
 {
     DisplayManager &vu = getInstance();
@@ -141,7 +141,7 @@ bool DisplayManager::startTask(int core_id, uint32_t priority, uint32_t stack_wo
     vu.stack_words_ = stack_words;
 
     // Spawn display task via ModuleBase helper
-    return vu.spawnTask("vu", (uint32_t)stack_words, (UBaseType_t)priority, core_id,
+    return vu.spawnTask("vu", (uint32_t)stack_words, priority, core_id,
                         DisplayManager::taskTrampoline);
 }
 
@@ -157,6 +157,11 @@ void DisplayManager::stopTask()
             vu.setTaskHandle(nullptr);
         }
     }
+}
+
+bool DisplayManager::isReady()
+{
+    return getInstance().isRunning();
 }
 
 bool DisplayManager::enqueue(const VUSample &s)

@@ -59,7 +59,7 @@ namespace Diagnostics
 void verifySIMD()
 {
     Console::printOrSerial(LogLevel::INFO, "");
-    Console::printOrSerial(LogLevel::INFO, "=== TESTING IF RUNNING ON A SIMD-ENABLED CPU ===");
+    Console::printOrSerial(LogLevel::INFO, "=== TESTING IF SIMD-ENABLED SYSTEM ===");
 
     alignas(16) float test_a[24] = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,
                                     13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24};

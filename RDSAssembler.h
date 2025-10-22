@@ -113,8 +113,12 @@ class RDSAssembler : public ModuleBase
      * Start the assembler task pinned to core_id, with the given priority and stack.
      * bit_queue_len controls the depth of the bit FIFO; 1024 is ample for safety.
      */
-    static bool startTask(int core_id, uint32_t priority, uint32_t stack_words,
+    static bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                           size_t bit_queue_len = 1024);
+    /** Stop RDS Assembler task (deletes the FreeRTOS task). */
+    static void stopTask();
+    /** Returns true once the assembler task is initialized and running. */
+    static bool isReady();
 
     /**
      * Non-blocking fetch of the next bit. Returns true if a bit was available.
@@ -254,7 +258,7 @@ class RDSAssembler : public ModuleBase
     QueueHandle_t bit_queue_; ///< FreeRTOS queue for RDS bits
     size_t bit_queue_len_;    ///< Queue depth in bits
     int core_id_;             ///< FreeRTOS core ID
-    uint32_t priority_;       ///< Task priority
+    UBaseType_t priority_;    ///< Task priority
     uint32_t stack_words_;    ///< Stack size in words
 
     // RDS builder state (member variables)
@@ -290,7 +294,7 @@ class RDSAssembler : public ModuleBase
 // Backward compatibility namespace wrapper
 namespace RDSAssembler_NS
 {
-inline bool startTask(int core_id, uint32_t priority, uint32_t stack_words,
+inline bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                       size_t bit_queue_len = 1024)
 {
     return RDSAssembler::startTask(core_id, priority, stack_words, bit_queue_len);

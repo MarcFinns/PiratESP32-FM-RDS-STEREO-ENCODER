@@ -211,27 +211,17 @@ Console::Console()
  *
  * Delegates to the singleton instance.
  */
-bool Console::begin(size_t queue_len, int core_id, uint32_t priority, uint32_t stack_words)
+/**
+ * Static Wrapper - Start Console Task (single entry point)
+ */
+bool Console::startTask(int core_id, UBaseType_t priority, uint32_t stack_words, size_t queue_len)
 {
     Console &logger = getInstance();
     logger.queue_len_ = queue_len;
     logger.core_id_ = core_id;
     logger.priority_ = priority;
     logger.stack_words_ = stack_words;
-
-    // Spawn the console task via ModuleBase helper
-    return logger.spawnTask("console", (uint32_t)stack_words, (UBaseType_t)priority, core_id,
-                            Console::taskTrampoline);
-}
-
-/**
- * Static Wrapper - Start Console Task (Convenience)
- *
- * Alternative parameter order for consistency with other modules.
- */
-bool Console::startTask(int core_id, uint32_t priority, uint32_t stack_words, size_t queue_len)
-{
-    return begin(queue_len, core_id, priority, stack_words);
+    return logger.spawnTask("console", stack_words, priority, core_id, Console::taskTrampoline);
 }
 
 /**
@@ -357,6 +347,20 @@ void Console::markStartupComplete()
 void Console::taskTrampoline(void *arg)
 {
     ModuleBase::defaultTaskTrampoline(arg);
+}
+
+void Console::stopTask()
+{
+    Console &c = getInstance();
+    if (c.isRunning())
+    {
+        TaskHandle_t h = c.getTaskHandle();
+        if (h)
+        {
+            vTaskDelete(h);
+            c.setTaskHandle(nullptr);
+        }
+    }
 }
 
 /**

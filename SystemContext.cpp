@@ -297,8 +297,7 @@ void SystemContext::shutdown()
     }
 
     // ---- Step 2: Stop RDS Assembler (Core 1) ----
-    // Note: RDSAssembler::stopTask() needs to be implemented
-    // For now, this is a placeholder for future task shutdown logic
+    RDSAssembler::stopTask();
     Console::enqueuef(LogLevel::INFO, "RDS Assembler stopped");
 
     // ---- Step 3: Stop VU Meter (Core 1) ----
@@ -307,8 +306,7 @@ void SystemContext::shutdown()
 
     // ---- Step 4: Stop Console (Core 1) - Last ----
     Console::enqueuef(LogLevel::INFO, "SystemContext shutdown complete");
-    // Note: Console::stopTask() needs to be implemented
-    // For now, this is a placeholder for future task shutdown logic
+    Console::stopTask();
 
     // ---- Step 5: Shutdown Hardware Driver ----
     if (hardware_driver_ != nullptr)

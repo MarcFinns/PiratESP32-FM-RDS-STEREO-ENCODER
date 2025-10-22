@@ -76,7 +76,7 @@ RDSAssembler::RDSAssembler()
 //                          STATIC WRAPPER API
 // ==================================================================================
 
-bool RDSAssembler::startTask(int core_id, uint32_t priority, uint32_t stack_words,
+bool RDSAssembler::startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                              size_t bit_queue_len)
 {
     RDSAssembler &rds = getInstance();
@@ -89,10 +89,24 @@ bool RDSAssembler::startTask(int core_id, uint32_t priority, uint32_t stack_word
 
     // Spawn assembler task via ModuleBase helper
     return rds.spawnTask("rds_asm",
-                         (uint32_t)stack_words,
-                         (UBaseType_t)priority,
+                         stack_words,
+                         priority,
                          core_id,
                          RDSAssembler::taskTrampoline);
+}
+
+void RDSAssembler::stopTask()
+{
+    RDSAssembler &rds = getInstance();
+    if (rds.isRunning())
+    {
+        TaskHandle_t h = rds.getTaskHandle();
+        if (h)
+        {
+            vTaskDelete(h);
+            rds.setTaskHandle(nullptr);
+        }
+    }
 }
 
 bool RDSAssembler::nextBit(uint8_t &bit)
@@ -103,6 +117,11 @@ bool RDSAssembler::nextBit(uint8_t &bit)
 void RDSAssembler::setPI(uint16_t pi)
 {
     getInstance().pi_ = pi;
+}
+
+bool RDSAssembler::isReady()
+{
+    return getInstance().isRunning();
 }
 void RDSAssembler::setPTY(uint8_t pty)
 {

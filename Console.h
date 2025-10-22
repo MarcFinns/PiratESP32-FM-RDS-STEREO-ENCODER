@@ -129,8 +129,7 @@ class Console : public ModuleBase
      * Returns:
      *   true if initialization successful, false on failure
      */
-    static bool begin(size_t queue_len = 64, int core_id = 1, uint32_t priority = 2,
-                      uint32_t stack_words = 4096);
+    // Removed legacy begin(queue_len, core, priority, stack) to keep a single entry.
 
     /**
      * Start Console Task (Convenience Wrapper)
@@ -152,8 +151,11 @@ class Console : public ModuleBase
      * Example:
      *   Console::startTask(1, 2, 4096, 128);
      */
-    static bool startTask(int core_id, uint32_t priority, uint32_t stack_words,
+    static bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
                           size_t queue_len = 64);
+
+    /** Stop Console Task (deletes the FreeRTOS task). */
+    static void stopTask();
 
     /**
      * Enqueue Formatted Log Message (printf-style)
@@ -350,7 +352,7 @@ class Console : public ModuleBase
      *
      * FreeRTOS task priority. Typically 2 (higher than display, lower than audio).
      */
-    uint32_t priority_;
+    UBaseType_t priority_;
 
     /**
      * Configuration: Stack Size
