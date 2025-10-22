@@ -4,11 +4,15 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 ## Features
 
-- **Real-time FM Stereo Encoding**: Processes audio stereo input to FM multiplex output, ready to drive any FM transmitter
-- **RDS Support**: Transmits station information (PS, RT, PI, PTY) via RDS protocol
+- **Real-time FM Stereo Encoding**: Stereo audio → FM multiplex (MPX) @ 192 kHz DAC
+- **RDS Core**: PI/PTY/TP/TA/MS, PS/RT with EU PTY mapping; RT rotation list
+- **Runtime Controls (SCPI/JSON)**: Full CLI for RDS, audio, pilot, and system; JSON replies
+- **Profiles (NVS)**: Save/load named configurations via serial console
+- **Pilot Control**: Enable and auto‑mute on silence (threshold/hold configurable)
+- **Configurable Pre‑emphasis**: 50 µs (EU) or 75 µs, toggleable at runtime
 - **Sophisticated DSP Pipeline**:
   - Audio sampling at 24 bit, 48KHz
-  - 50 µs pre-emphasis filtering (European FM standard)
+  - Pre‑emphasis filtering (50/75 µs)
   - 19 kHz notch filter to prevent pilot tone interference
   - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
@@ -19,7 +23,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
   - MPX audio out via 32 bit DAC at 192 KHz
   
 - **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring
-- **Dual-Core Architecture**: Optimized task distribution across ESP32's two cores
+- **Dual-Core Architecture**: Four tasks across both cores (DSP/Console/RDS/Display)
 - **Performance Monitoring**: Real-time CPU usage and audio statistics logging
 
 ## Hardware Requirements
@@ -63,6 +67,17 @@ CS   (Chip Select):     GPIO 1
 RST  (Reset):           GPIO 2
 ```
 
+## Documentation
+
+The following documents provide details on the signal chain, software design, hardware wiring, project layout, and the serial console interface.
+
+- docs/DSP_Pipeline.md — Signal path and modulation details
+- docs/Software_Architecture.md — Tasks, cores, queues, modules, patterns
+- docs/Hardware_Setup.md — BOM, wiring, clocks, pins, modes
+- docs/Project_Structure.md — Files and their roles
+- docs/SerialConsole.md — SCPI/JSON CLI (source of truth)
+- docs/Calibration_and_Levels.md — Audio level, pre‑emphasis, pilot, RDS injection, frequency response
+
 ## Software Architecture
 
 ### Task Distribution
@@ -104,15 +119,13 @@ RST  (Reset):           GPIO 2
 - [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32)
 
 ### Libraries Required
-- **Arduino GFX** 
-
-Faster than Adafruit, supports many displays. Found on [github] (https://github.com/moononournation/Arduino_GFX)
+- Arduino GFX Library (https://github.com/moononournation/Arduino_GFX)
 
 
 ### Compilation
 
 1. Clone or download this repository
-2. Open `ESP32 RDS STEREO ENCODER.ino` in Arduino IDE
+2. Open `PiratESP32-FM-RDS-STEREO-ENCODER.ino` in Arduino IDE
 3. Select your ESP32 board:
    - `Tools → Board → ESP32 Arduino → [Your Board]`
 4. Configure settings:
@@ -198,12 +211,15 @@ Edit pin assignments in `Config.h` to match your hardware.
 
 Use the serial console (Console task) with SCPI-style commands (115200 baud):
 
-Examples
+Quick start
+- `SYST:LOG:LEVEL OFF`          # silence periodic logs while configuring
 - `RDS:PI 0x52A1`
-- `RDS:PTY POP_MUSIC`
+- `RDS:PTY POP_MUSIC`           # or a number 0–31
 - `RDS:PS "PiratESP"`
-- `RDS:RTLIST:ADD "Artist • Title • Album"`
-- `RDS:RTPERIOD 20`
+- `RDS:RT "Artist - Title"`
+- `AUDIO:STEREO 1`              # enable L−R (38 kHz)
+- `PILOT:ENABLE 1`              # enable pilot (19 kHz)
+- `RDS:ENABLE 1`                # enable RDS (57 kHz)
 
 See `docs/SerialConsole.md` for the full command reference.
 
@@ -216,28 +232,12 @@ Serial console output (every 5 seconds):
 ```
 
 ## Project Structure
+See `docs/Project_Structure.md` for a complete overview of files and folders.
 
-```
-ESP32 RDS STEREO ENCODER/
-├── ESP32 RDS STEREO ENCODER.ino  # Main application entry point
-├── Config.h                  # Central configuration file
-├── DSP_pipeline.h/.cpp             # DSP pipeline orchestrator
-├── I2SDriver.h/.cpp               # I2S hardware interface
-├── PreemphasisFilter.h/.cpp       # FM pre-emphasis filter
-├── NotchFilter19k.h/.cpp          # 19 kHz notch filter
-├── PolyphaseFIRUpsampler.h/.cpp   # 4× FIR upsampler
-├── StereoMatrix.h/.cpp            # L+R/L-R signal generator
-├── NCO.h/.cpp                     # Numerically-controlled oscillator
-├── MPXMixer.h/.cpp                # FM multiplex synthesizer
-├── RDSAssembler.h/.cpp            # RDS bitstream assembler
-├── RDSSynth.h/.cpp                # RDS 57 kHz modulator
-├── VUMeter.h/.cpp                 # TFT display driver
-├── Console.h/.cpp                 # Serial console (CLI) + log draining
-├── AudioStats.h                   # Audio statistics tracker
-├── TaskStats.h/.cpp               # FreeRTOS task profiling
-├── Diagnostics.h/.cpp             # Debug utilities
-└── README.md                      # This file
-```
+## RDS Groups Implemented
+- Group 0A: PI, flags, PS
+- Group 2A: RT (A/B toggle on change)
+- No CT (4A) by design; advanced groups intentionally omitted for simplicity
 
 ## Performance
 

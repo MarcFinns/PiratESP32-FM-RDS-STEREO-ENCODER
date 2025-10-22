@@ -3,7 +3,7 @@
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
  *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
- *                          Display Manager (ModuleBase)
+ *                          Display Manager (TaskBaseClass)
  *
  * =====================================================================================
  *
@@ -44,8 +44,8 @@
 #include "Config.h"
 #include "Console.h"
 #include "DSP_pipeline.h"
-#include "RDSAssembler.h"
 #include "PtyMap.h"
+#include "RDSAssembler.h"
 
 #include <Arduino.h>
 #include <algorithm>
@@ -60,7 +60,8 @@
 // ----------------------------------------------------------------------------------
 //                      Shared UI Layout Constants (file-scope)
 // ----------------------------------------------------------------------------------
-namespace {
+namespace
+{
 // Global vertical shift applied to the whole main screen UI (negative moves up)
 constexpr int UI_SHIFT_Y = -10; // raise UI by 10 px
 constexpr int DISPLAY_WIDTH = 320;
@@ -69,7 +70,8 @@ constexpr int MARGIN_X = 16;
 constexpr int VU_BAR_HEIGHT = 22;
 constexpr int VU_BAR_SPACING = 32;
 constexpr int BOTTOM_MARGIN = 8;
-constexpr int VU_Y = DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN + UI_SHIFT_Y;
+constexpr int VU_Y =
+    DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN + UI_SHIFT_Y;
 constexpr int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
 constexpr int VU_LABEL_WIDTH = 14;
 constexpr int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
@@ -79,10 +81,10 @@ constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
 constexpr int PEAK_WIDTH = 3;
 constexpr int PEAK_HEIGHT = VU_BAR_HEIGHT;
 // Shared top text/status layout
-constexpr int STATUS_Y = 28 + UI_SHIFT_Y;   // small area above PS line
-constexpr int DIVIDER_PS_Y = 50 + UI_SHIFT_Y;   // divider under PS
+constexpr int STATUS_Y = 28 + UI_SHIFT_Y;            // small area above PS line
+constexpr int DIVIDER_PS_Y = 50 + UI_SHIFT_Y;        // divider under PS
 constexpr int DIVIDER_ABOVE_VU_Y = 138 + UI_SHIFT_Y; // divider above VU
-constexpr int TEXT_PS_Y = 70 + UI_SHIFT_Y;    // Program Service text baseline
+constexpr int TEXT_PS_Y = 70 + UI_SHIFT_Y;           // Program Service text baseline
 } // namespace
 
 // ==================================================================================
@@ -140,7 +142,7 @@ bool DisplayManager::startTask(int core_id, UBaseType_t priority, uint32_t stack
     vu.priority_ = priority;
     vu.stack_words_ = stack_words;
 
-    // Spawn display task via ModuleBase helper
+    // Spawn display task via TaskBaseClass helper
     return vu.spawnTask("vu", (uint32_t)stack_words, priority, core_id,
                         DisplayManager::taskTrampoline);
 }
@@ -185,7 +187,7 @@ bool DisplayManager::enqueueStats(const VUStatsSnapshot &s)
 
 void DisplayManager::taskTrampoline(void *arg)
 {
-    ModuleBase::defaultTaskTrampoline(arg);
+    TaskBaseClass::defaultTaskTrampoline(arg);
 }
 
 bool DisplayManager::begin()
@@ -247,6 +249,7 @@ bool DisplayManager::begin()
                 gfx_->print("R");
 
                 const int gridTicks = 5;
+
                 for (int i = 0; i <= gridTicks; i++)
                 {
                     int x = MARGIN_X + VU_LABEL_WIDTH + (i * VU_BAR_WIDTH) / gridTicks;
@@ -259,6 +262,7 @@ bool DisplayManager::begin()
                 int bandH = 24;
                 gfx_->fillRect(x0, bandY, VU_BAR_WIDTH, bandH, 0x0000);
                 gfx_->drawFastHLine(x0, MID_SCALE_Y, VU_BAR_WIDTH, 0x7BEF);
+
 
                 auto dbToX_Scale = [&](float dB)
                 {
@@ -276,7 +280,7 @@ bool DisplayManager::begin()
                 for (int i = 0; i < nLabels; ++i)
                 {
                     int px = x0 + dbToX_Scale(labels[i]);
-                    gfx_->drawFastVLine(px, MID_SCALE_Y - 8, 16, 0xFFFF);
+                   // gfx_->drawFastVLine(px, MID_SCALE_Y - 8, 16, 0xFFFF);
                     char buf[8];
                     if (labels[i] == 0)
                         snprintf(buf, sizeof(buf), "0");
@@ -298,8 +302,10 @@ bool DisplayManager::begin()
             drawScale();
             // Static accent dividers (match layout constants used in process())
             {
-                gfx_->drawFastHLine(MARGIN_X, DIVIDER_PS_Y, VU_WIDTH, Config::UI::COLOR_ACCENT);  // under PS
-                gfx_->drawFastHLine(MARGIN_X, DIVIDER_ABOVE_VU_Y, VU_WIDTH, Config::UI::COLOR_ACCENT); // above VU
+                gfx_->drawFastHLine(MARGIN_X, DIVIDER_PS_Y, VU_WIDTH,
+                                    Config::UI::COLOR_ACCENT); // under PS
+                gfx_->drawFastHLine(MARGIN_X, DIVIDER_ABOVE_VU_Y, VU_WIDTH,
+                                    Config::UI::COLOR_ACCENT); // above VU
             }
             ErrorHandler::logInfo("DisplayManager", "VU display initialized (ILI9341)");
         }

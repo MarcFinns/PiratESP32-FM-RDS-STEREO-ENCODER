@@ -3,7 +3,7 @@
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
  *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
- *                       Display Manager (ModuleBase)
+ *                       Display Manager (TaskBaseClass)
  *
  * =====================================================================================
  *
@@ -63,7 +63,7 @@
 #pragma once
 
 #include "ErrorHandler.h"
-#include "ModuleBase.h"
+#include "TaskBaseClass.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -158,7 +158,7 @@ struct VUStatsSnapshot
 /**
  * VUMeter - Professional VU Meter Display Module
  *
- * Inherits from ModuleBase to provide unified FreeRTOS task lifecycle management.
+ * Inherits from TaskBaseClass to provide unified FreeRTOS task lifecycle management.
  * Displays real-time audio levels on ILI9341 TFT display with professional ballistics.
  *
  * Queue Semantics (See QueueContracts.md for full design rationale):
@@ -194,7 +194,7 @@ struct VUStatsSnapshot
  * Backward Compatibility:
  *   Static wrapper methods maintain compatibility with original namespace-based API.
  */
-class DisplayManager : public ModuleBase
+class DisplayManager : public TaskBaseClass
 {
   public:
     /**
@@ -368,7 +368,7 @@ class DisplayManager : public ModuleBase
     virtual ~DisplayManager() = default;
 
     /**
-     * Initialize Module Resources (ModuleBase contract)
+     * Initialize Module Resources (TaskBaseClass contract)
      *
      * Called once when the task starts. Initializes display and prepares
      * the VU meter for operation.
@@ -379,7 +379,7 @@ class DisplayManager : public ModuleBase
     bool begin() override;
 
     /**
-     * Main Processing Loop Body (ModuleBase contract)
+     * Main Processing Loop Body (TaskBaseClass contract)
      *
      * Called repeatedly in infinite loop. Reads samples from queue,
      * applies ballistics, and renders to display at ~50 FPS.
@@ -387,7 +387,7 @@ class DisplayManager : public ModuleBase
     void process() override;
 
     /**
-     * Shutdown Module Resources (ModuleBase contract)
+     * Shutdown Module Resources (TaskBaseClass contract)
      *
      * Called during graceful shutdown. Cleans up display resources.
      */
@@ -397,7 +397,7 @@ class DisplayManager : public ModuleBase
      * Task Trampoline (FreeRTOS Entry Point)
      *
      * Static function called by FreeRTOS when task starts.
-     * Delegates to ModuleBase::defaultTaskTrampoline().
+     * Delegates to TaskBaseClass::defaultTaskTrampoline().
      *
      * Parameters:
      *   arg: Pointer to VUMeter instance

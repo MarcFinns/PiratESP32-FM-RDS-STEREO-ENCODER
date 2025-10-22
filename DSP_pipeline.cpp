@@ -30,7 +30,7 @@
 
 #include "DSP_pipeline.h"
 #include "Diagnostics.h"
-#include "ModuleBase.h"
+#include "TaskBaseClass.h"
 #include "ErrorHandler.h"
 #include "Console.h"
 #include "RDSSynth.h"
@@ -113,7 +113,7 @@ bool DSP_pipeline::getPilotActive()
     // Active if user-enabled and not currently auto-muted due to silence.
     // pilot_muted_ is an instance member; access via singleton instance.
     // The audio task manages a single DSP_pipeline instance.
-    // Find the running instance via the FreeRTOS task handle stored in ModuleBase.
+    // Find the running instance via the FreeRTOS task handle stored in TaskBaseClass.
     // Simpler approach: static shadow of last-known mute state updated in process.
     extern bool g_dsp_pilot_muted_shadow; // forward from below
     return s_pilot_enable && !g_dsp_pilot_muted_shadow;
@@ -744,7 +744,7 @@ void DSP_pipeline::process()
  */
 bool DSP_pipeline::startTaskInstance(int core_id, UBaseType_t priority, uint32_t stack_words)
 {
-    return ModuleBase::spawnTaskFor(
+    return TaskBaseClass::spawnTaskFor(
         this,
         "audio",
         stack_words,

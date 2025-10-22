@@ -7,7 +7,7 @@
  *
  * =====================================================================================
  *
- * File:         ModuleBase.h
+ * File:         TaskBaseClass.h
  * Description:  Abstract base class for all FreeRTOS task modules
  *
  * Purpose:
@@ -27,7 +27,7 @@
  *   5. On error: begin() returns false -> task self-deletes
  *   6. On shutdown: stopTask() signals graceful termination
  *
- * Usage Example: Inherit from ModuleBase and implement begin(), process(), and shutdown()
+ * Usage Example: Inherit from TaskBaseClass and implement begin(), process(), and shutdown()
  *
  * =====================================================================================
  */
@@ -40,7 +40,7 @@
 #include <freertos/task.h>
 
 /**
- * ModuleBase - Abstract Base Class for Task-Based Modules
+ * TaskBaseClass - Abstract Base Class for Task-Based Modules
  *
  * All FreeRTOS task modules in the system inherit from this class.
  * Provides unified interface for task lifecycle management.
@@ -66,11 +66,11 @@
  *   3. Implement shutdown() - cleanup resources
  *   4. Create static taskTrampoline() - FreeRTOS entry point
  */
-class ModuleBase
+class TaskBaseClass
 {
   public:
     /**
-     * Static helper to spawn a FreeRTOS task for arbitrary objects (non-ModuleBase).
+     * Static helper to spawn a FreeRTOS task for arbitrary objects (non-TaskBaseClass).
      * The caller is responsible for storing the returned TaskHandle_t.
      */
     static bool spawnTaskFor(void *self,
@@ -82,7 +82,7 @@ class ModuleBase
                              TaskHandle_t *out_handle)
     {
         TaskHandle_t handle = nullptr;
-        TaskFunction_t fn = entry ? entry : ModuleBase::defaultTaskTrampoline;
+        TaskFunction_t fn = entry ? entry : TaskBaseClass::defaultTaskTrampoline;
         BaseType_t ok = xTaskCreatePinnedToCore(
             fn,
             task_name,
@@ -104,7 +104,7 @@ class ModuleBase
      *
      * Ensures proper cleanup of derived class resources.
      */
-    virtual ~ModuleBase() = default;
+    virtual ~TaskBaseClass() = default;
 
     /**
      * Initialize Module Resources
@@ -190,7 +190,7 @@ class ModuleBase
      *
      * Only called by derived classes. Initializes module state.
      */
-    ModuleBase() : task_handle_(nullptr), is_running_(false) {}
+    TaskBaseClass() : task_handle_(nullptr), is_running_(false) {}
 
     /**
      * Default Task Trampoline Implementation
@@ -198,25 +198,25 @@ class ModuleBase
      * Can be used directly in derived classes if no special initialization needed:
      *
      * Example:
-     *   class MyModule : public ModuleBase {
+     *   class MyModule : public TaskBaseClass {
      *   private:
      *       static void taskTrampoline(void* arg) {
-     *           ModuleBase::defaultTaskTrampoline(arg);
+     *           TaskBaseClass::defaultTaskTrampoline(arg);
      *       }
      *   };
      *
      * Parameters:
-     *   arg: Pointer to ModuleBase instance (passed from xTaskCreatePinnedToCore)
+     *   arg: Pointer to TaskBaseClass instance (passed from xTaskCreatePinnedToCore)
      *
      * Execution Flow:
-     *   1. Cast void* to ModuleBase*
+     *   1. Cast void* to TaskBaseClass*
      *   2. Call begin() - if fails, task deletes itself
      *   3. Call process() in infinite loop
      *   4. Never returns (task runs until shutdown)
      */
     static void defaultTaskTrampoline(void *arg)
     {
-        auto *self = static_cast<ModuleBase *>(arg);
+        auto *self = static_cast<TaskBaseClass *>(arg);
 
         // Initialize module
         if (!self->begin())
@@ -258,7 +258,7 @@ class ModuleBase
                    TaskFunction_t entry = nullptr)
     {
         TaskHandle_t handle = nullptr;
-        TaskFunction_t fn = entry ? entry : ModuleBase::defaultTaskTrampoline;
+        TaskFunction_t fn = entry ? entry : TaskBaseClass::defaultTaskTrampoline;
         BaseType_t ok = xTaskCreatePinnedToCore(
             fn,
             task_name,

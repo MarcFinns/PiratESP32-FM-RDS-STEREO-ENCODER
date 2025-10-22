@@ -3,7 +3,7 @@
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
  *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
- *                       RDS Assembler (ModuleBase)
+ *                       RDS Assembler (TaskBaseClass)
  *
  * =====================================================================================
  *
@@ -34,7 +34,7 @@
 #pragma once
 
 #include "ErrorHandler.h"
-#include "ModuleBase.h"
+#include "TaskBaseClass.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -46,7 +46,7 @@
 /**
  * RDSAssembler - RDS Bitstream Generator
  *
- * Inherits from ModuleBase to provide unified FreeRTOS task lifecycle management.
+ * Inherits from TaskBaseClass to provide unified FreeRTOS task lifecycle management.
  * Generates RDS bitstream (1187.5 bps) on Core 1, allowing audio core to read bits
  * via non-blocking nextBit() API.
  *
@@ -96,7 +96,7 @@
  * Backward Compatibility:
  *   Static wrapper methods maintain compatibility with original namespace-based API.
  */
-class RDSAssembler : public ModuleBase
+class RDSAssembler : public TaskBaseClass
 {
   public:
     /**
@@ -213,7 +213,7 @@ class RDSAssembler : public ModuleBase
     virtual ~RDSAssembler() = default;
 
     /**
-     * Initialize Module Resources (ModuleBase contract)
+     * Initialize Module Resources (TaskBaseClass contract)
      *
      * Called once when the task starts. Creates the bit queue.
      *
@@ -223,14 +223,14 @@ class RDSAssembler : public ModuleBase
     bool begin() override;
 
     /**
-     * Main Processing Loop Body (ModuleBase contract)
+     * Main Processing Loop Body (TaskBaseClass contract)
      *
      * Called repeatedly in infinite loop. Generates RDS bits and enqueues them.
      */
     void process() override;
 
     /**
-     * Shutdown Module Resources (ModuleBase contract)
+     * Shutdown Module Resources (TaskBaseClass contract)
      *
      * Called during graceful shutdown. Cleans up queue resources.
      */
@@ -240,7 +240,7 @@ class RDSAssembler : public ModuleBase
      * Task Trampoline (FreeRTOS Entry Point)
      *
      * Static function called by FreeRTOS when task starts.
-     * Delegates to ModuleBase::defaultTaskTrampoline().
+     * Delegates to TaskBaseClass::defaultTaskTrampoline().
      *
      * Parameters:
      *   arg: Pointer to RDSAssembler instance

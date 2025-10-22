@@ -16,7 +16,7 @@
  *   Core 0. Messages are enqueued via a lock-free FreeRTOS queue and drained
  *   asynchronously by the console task.
  *
- *   The Console class inherits from ModuleBase and follows the standardized task
+ *   The Console class inherits from TaskBaseClass and follows the standardized task
  *   lifecycle pattern for consistency with other system modules.
  *
  * Key Features:
@@ -25,7 +25,7 @@
  *   * Drop-on-overflow: If queue is full, messages are dropped with counter
  *   * Timestamped: Each message includes microsecond timestamp
  *   * Formatted output: printf-style formatting via enqueuef()
- *   * ModuleBase compliance: Unified lifecycle management (begin/process/shutdown)
+ *   * TaskBaseClass compliance: Unified lifecycle management (begin/process/shutdown)
  *
  * Usage Pattern:
  *   1. Call Console::startTask() during setup (runs on Core 1)
@@ -41,7 +41,7 @@
 
 #pragma once
 
-#include "ModuleBase.h"
+#include "TaskBaseClass.h"
 
 #include <cstdarg>
 #include <cstddef>
@@ -73,7 +73,7 @@ enum class LogLevel : uint8_t
  * Console - Serial Console + Log Drainer
  *
  * Thread-safe, non-blocking logging system for real-time audio applications.
- * Inherits from ModuleBase to provide unified task lifecycle management.
+ * Inherits from TaskBaseClass to provide unified task lifecycle management.
  *
  * The console task runs continuously on a dedicated FreeRTOS core (typically Core 1),
  * draining messages from a fixed-size queue and outputting them to Serial. Producers
@@ -97,7 +97,7 @@ enum class LogLevel : uint8_t
  *   * Non-blocking: Immediate return, never waits
  *   * Memory per message: 160 bytes (timestamp + level + 159-char string)
  */
-class Console : public ModuleBase
+class Console : public TaskBaseClass
 {
   public:
     /**
@@ -247,7 +247,7 @@ class Console : public ModuleBase
     virtual ~Console() = default;
 
     /**
-     * Initialize Module Resources (ModuleBase contract)
+     * Initialize Module Resources (TaskBaseClass contract)
      *
      * Called once when the task starts. Initializes Serial communication
      * and prepares the logger for operation.
@@ -258,7 +258,7 @@ class Console : public ModuleBase
     bool begin() override;
 
     /**
-     * Main Processing Loop Body (ModuleBase contract)
+     * Main Processing Loop Body (TaskBaseClass contract)
      *
      * Called repeatedly in infinite loop. Drains one message from the queue
      * and outputs it to Serial. If queue is empty, blocks waiting for message.
@@ -266,7 +266,7 @@ class Console : public ModuleBase
     void process() override;
 
     /**
-     * Shutdown Module Resources (ModuleBase contract)
+     * Shutdown Module Resources (TaskBaseClass contract)
      *
      * Called during graceful shutdown. Could flush remaining queue messages.
      */
@@ -276,7 +276,7 @@ class Console : public ModuleBase
      * Task Trampoline (FreeRTOS Entry Point)
      *
      * Static function provided to FreeRTOS task creation. Delegates to
-     * ModuleBase::defaultTaskTrampoline() for standard lifecycle handling.
+     * TaskBaseClass::defaultTaskTrampoline() for standard lifecycle handling.
      *
      * Parameters:
      *   arg: Pointer to Log instance (passed from xTaskCreatePinnedToCore)

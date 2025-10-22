@@ -36,7 +36,7 @@
  *   • Core isolation: Serial I/O runs exclusively on Core 1
  *   • Case-insensitive: Commands work as "RDS:PI", "rds:pi", "Rds:Pi"
  *   • Whitespace-tolerant: "RDS:PI 0x123" and "RDS:PI  0x123" both work
- *   • ModuleBase compliance: Unified task lifecycle management
+ *   • TaskBaseClass compliance: Unified task lifecycle management
  *
  * Performance Characteristics:
  *   • Command parse+execute: <1ms for most commands
@@ -346,7 +346,7 @@ void Console::markStartupComplete()
  */
 void Console::taskTrampoline(void *arg)
 {
-    ModuleBase::defaultTaskTrampoline(arg);
+    TaskBaseClass::defaultTaskTrampoline(arg);
 }
 
 void Console::stopTask()
@@ -364,7 +364,7 @@ void Console::stopTask()
 }
 
 /**
- * Initialize Module Resources (ModuleBase contract)
+ * Initialize Module Resources (TaskBaseClass contract)
  *
  * Called once when the task starts. Creates the logger queue and initializes
  * Serial communication.
@@ -405,7 +405,7 @@ bool Console::begin()
 }
 
 /**
- * Main Processing Loop Body (ModuleBase contract)
+ * Main Processing Loop Body (TaskBaseClass contract)
  *
  * Called repeatedly in infinite loop. Drains one message from the queue
  * and outputs it to Serial. If queue is empty, blocks waiting for message.
@@ -2917,7 +2917,7 @@ void Console::process()
 }
 
 /**
- * Shutdown Module Resources (ModuleBase contract)
+ * Shutdown Module Resources (TaskBaseClass contract)
  *
  * Called during graceful shutdown. Cleans up queue resources.
  */

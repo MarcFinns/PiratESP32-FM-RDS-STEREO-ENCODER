@@ -3,7 +3,7 @@
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
  *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
- *                       RDS Assembler (ModuleBase Implementation)
+ *                       RDS Assembler (TaskBaseClass Implementation)
  *
  * =====================================================================================
  *
@@ -87,7 +87,7 @@ bool RDSAssembler::startTask(int core_id, UBaseType_t priority, uint32_t stack_w
     rds.priority_ = priority;
     rds.stack_words_ = stack_words;
 
-    // Spawn assembler task via ModuleBase helper
+    // Spawn assembler task via TaskBaseClass helper
     return rds.spawnTask("rds_asm",
                          stack_words,
                          priority,
@@ -260,7 +260,7 @@ void RDSAssembler::setClock(int year, int month, int day, int hour, int minute,
 
 void RDSAssembler::taskTrampoline(void *arg)
 {
-    ModuleBase::defaultTaskTrampoline(arg);
+    TaskBaseClass::defaultTaskTrampoline(arg);
 }
 
 bool RDSAssembler::begin()
