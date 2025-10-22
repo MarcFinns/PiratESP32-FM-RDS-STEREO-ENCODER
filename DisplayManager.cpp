@@ -61,13 +61,15 @@
 //                      Shared UI Layout Constants (file-scope)
 // ----------------------------------------------------------------------------------
 namespace {
+// Global vertical shift applied to the whole main screen UI (negative moves up)
+constexpr int UI_SHIFT_Y = -10; // raise UI by 10 px
 constexpr int DISPLAY_WIDTH = 320;
 constexpr int DISPLAY_HEIGHT = 240;
 constexpr int MARGIN_X = 16;
 constexpr int VU_BAR_HEIGHT = 22;
 constexpr int VU_BAR_SPACING = 32;
 constexpr int BOTTOM_MARGIN = 8;
-constexpr int VU_Y = DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
+constexpr int VU_Y = DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN + UI_SHIFT_Y;
 constexpr int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
 constexpr int VU_LABEL_WIDTH = 14;
 constexpr int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
@@ -76,6 +78,11 @@ constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
 constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
 constexpr int PEAK_WIDTH = 3;
 constexpr int PEAK_HEIGHT = VU_BAR_HEIGHT;
+// Shared top text/status layout
+constexpr int STATUS_Y = 28 + UI_SHIFT_Y;   // small area above PS line
+constexpr int DIVIDER_PS_Y = 50 + UI_SHIFT_Y;   // divider under PS
+constexpr int DIVIDER_ABOVE_VU_Y = 138 + UI_SHIFT_Y; // divider above VU
+constexpr int TEXT_PS_Y = 70 + UI_SHIFT_Y;    // Program Service text baseline
 } // namespace
 
 // ==================================================================================
@@ -286,8 +293,8 @@ bool DisplayManager::begin()
             drawScale();
             // Static accent dividers (match layout constants used in process())
             {
-                gfx_->drawFastHLine(MARGIN_X, 50, VU_WIDTH, Config::UI::COLOR_ACCENT);  // under PS
-                gfx_->drawFastHLine(MARGIN_X, 138, VU_WIDTH, Config::UI::COLOR_ACCENT); // above VU
+                gfx_->drawFastHLine(MARGIN_X, DIVIDER_PS_Y, VU_WIDTH, Config::UI::COLOR_ACCENT);  // under PS
+                gfx_->drawFastHLine(MARGIN_X, DIVIDER_ABOVE_VU_Y, VU_WIDTH, Config::UI::COLOR_ACCENT); // above VU
             }
             ErrorHandler::logInfo("DisplayManager", "VU display initialized (ILI9341)");
         }
@@ -591,7 +598,6 @@ void DisplayManager::process()
                         if (strncmp(line, last_line, sizeof(last_line)) != 0)
                         {
                             // Clear bar region and print tokens with per-flag color
-                            const int STATUS_Y = 28; // small area above PS
                             const int STATUS_H = 12; // roughly one text line
                             gfx_->fillRect(MARGIN_X, STATUS_Y - 2, VU_WIDTH, STATUS_H + 4,
                                            COLOR_BLACK);
@@ -668,7 +674,7 @@ void DisplayManager::process()
             const int RT_SIZE = 2;
             const int PS_H = CHAR_H * PS_SIZE;
             const int RT_H = CHAR_H * RT_SIZE;
-            const int TEXT_PS_Y = 70;
+            // TEXT_PS_Y is defined at file scope and already includes UI_SHIFT_Y
             const int TEXT_RT_Y = TEXT_PS_Y + PS_H + 6;
 
             // Draw PS centered (size 3); only if changed
