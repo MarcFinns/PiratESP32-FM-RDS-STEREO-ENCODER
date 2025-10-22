@@ -60,6 +60,7 @@
 // ----------------------------------------------------------------------------------
 //                      Shared UI Layout Constants (file-scope)
 // ----------------------------------------------------------------------------------
+
 namespace
 {
 // Global vertical shift applied to the whole main screen UI (negative moves up)
