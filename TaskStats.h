@@ -17,7 +17,7 @@
  * Monitored Tasks and Cores:
  *   • Core 0 (Real-Time Audio): Runs DSP_pipeline at 48 kHz → 192 kHz conversion
  *   • Core 1 (I/O Services): Runs Console and VUMeter tasks for display/error reporting
- *   • Per-task CPU%: Relative CPU time for named tasks (audio, logger, vu)
+ *   • Per-task CPU%: Relative CPU time for named tasks (audio, console, vu)
  *   • Per-task stack: Free stack space (in 32-bit words for ESP32 FreeRTOS)
  *
  * Data Collection:
@@ -68,9 +68,9 @@ void init();
 bool collect(float &core0_load,
              float &core1_load,
              float &audio_cpu,
-             float &logger_cpu,
+             float &logger_cpu,   // console task (serial/log)
              float &vu_cpu,
              uint32_t &audio_stack_free_words,
-             uint32_t &logger_stack_free_words,
+             uint32_t &logger_stack_free_words, // console task (serial/log)
              uint32_t &vu_stack_free_words);
 } // namespace TaskStats

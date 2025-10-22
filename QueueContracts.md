@@ -22,7 +22,7 @@ This document describes the inter-module communication patterns via FreeRTOS que
 
 ### 1. Console Module - Log Queue
 
-**Queue Type:** FIFO with drop-on-overflow
+**Queue Type:** FIFO with drop-on-overflow (drop oldest, then insert)
 
 **Parameters:**
 - Default size: 64 messages
@@ -30,12 +30,12 @@ This document describes the inter-module communication patterns via FreeRTOS que
 - Total capacity: ~10 KB
 - Timeout: 0 (non-blocking)
 
-**Overflow Semantics:**
+**Overflow Semantics (drop-oldest):**
 ```cpp
 bool Console::enqueueRaw(LogLevel level, const char *msg) {
     if (xQueueSend(queue_, &entry, 0) != pdTRUE) {
-        ++dropped_count_;  // Counter incremented
-        return false;      // Message dropped silently
+        LogMsg dummy; xQueueReceive(queue_, &dummy, 0); // drop oldest
+        if (xQueueSend(queue_, &entry, 0) != pdTRUE) { ++dropped_count_; return false; }
     }
     return true;
 }

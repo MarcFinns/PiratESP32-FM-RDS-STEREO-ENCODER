@@ -868,6 +868,10 @@ void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us,
 {
     using namespace Config;
 
+    // Skip composing/enqueuing periodic logs if console is muted and not in startup
+    if (!Console::shouldLog(LogLevel::INFO))
+        return;
+
     (void)frames_read; // Unused parameter (reserved for future use)
 
     // Print formatted header

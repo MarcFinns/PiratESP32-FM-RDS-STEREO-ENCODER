@@ -67,6 +67,7 @@
 #include "DisplayManager.h"
 #include "RDSAssembler.h"
 #include "TaskStats.h"
+#include "PtyMap.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <cstdarg>
@@ -252,6 +253,16 @@ bool Console::printfOrSerial(LogLevel level, const char *fmt, ...)
     return false;
 }
 
+bool Console::shouldLog(LogLevel level)
+{
+    // Allow all during startup; otherwise respect mute and level threshold
+    if (s_startup_phase)
+        return true;
+    int lvl = static_cast<int>(level);
+    int thr = static_cast<int>(s_min_level);
+    return (!s_log_mute) && (lvl >= thr);
+}
+
 bool Console::isReady()
 {
     return getInstance().isRunning();
@@ -344,6 +355,39 @@ bool Console::begin()
 static Preferences s_prefs;
 static const char *kPrefsNs = "conf";
 static bool s_prefs_open = false;
+
+// -------------------- Minimal JSON string escaping helpers --------------------
+static inline void json_print_escaped_range(const char *s, const char *e)
+{
+    while (s < e)
+    {
+        char c = *s++;
+        if (c == '\\' || c == '"')
+        {
+            Serial.print('\\');
+            Serial.print(c);
+        }
+        else if ((unsigned char)c < 0x20)
+        {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04X", (unsigned)(unsigned char)c);
+            Serial.print(buf);
+        }
+        else
+        {
+            Serial.print(c);
+        }
+    }
+}
+static inline void json_print_string(const char *s)
+{
+    Serial.print('"');
+    const char *p = s;
+    while (*p)
+        ++p;
+    json_print_escaped_range(s, p);
+    Serial.print('"');
+}
 
 static void conf_open_rw()
 {
@@ -742,33 +786,7 @@ void Console::process()
     // Process one command per loop cycle to maintain responsiveness.
     // ==================================================================================
 
-    // Note: haveLine() lambda is unused legacy code, kept for compatibility
-    auto haveLine = []() -> bool
-    {
-        static char buf[256];
-        static size_t len = 0;
-        while (Serial.available() > 0)
-        {
-            int c = Serial.read();
-            if (c < 0)
-                break;
-            char ch = (char)c;
-            if (ch == '\r')
-                continue;
-            if (ch == '\n')
-            {
-                buf[len] = '\0';
-                len = 0;
-                // Store line in a static place for retrieval
-                strncpy((char *)buf, (const char *)buf, sizeof(buf) - 1);
-                // misuse return; we will fetch via getter below
-                return true;
-            }
-            if (len < sizeof(buf) - 1)
-                buf[len++] = ch;
-        }
-        return false;
-    };
+    // (Removed legacy haveLine() helper; line-oriented reading handled below)
 
     static char line_buf[256];  // Input buffer for current command line
     static size_t line_len = 0; // Current length of line_buf
@@ -945,28 +963,7 @@ void Console::process()
                     Serial.print("{\"ok\":true,\"data\":{");
                     const char *p = kv ? kv : "";
                     bool first = true;
-                    auto print_escaped = [&](const char *s, const char *e)
-                    {
-                        while (s < e)
-                        {
-                            char c = *s++;
-                            if (c == '\\' || c == '\"')
-                            {
-                                Serial.print('\\');
-                                Serial.print(c);
-                            }
-                            else if ((unsigned char)c < 0x20)
-                            {
-                                char buf[8];
-                                snprintf(buf, sizeof(buf), "\\u%04X", (unsigned)(unsigned char)c);
-                                Serial.print(buf);
-                            }
-                            else
-                            {
-                                Serial.print(c);
-                            }
-                        }
-                    };
+                    // (JSON escaping centralized via json_print_escaped_range)
                     while (*p)
                     {
                         // skip leading spaces
@@ -1025,13 +1022,13 @@ void Console::process()
                             Serial.print(',');
                         first = false;
                         Serial.print('\"');
-                        print_escaped(k0, k1);
+                        json_print_escaped_range(k0, k1);
                         Serial.print("\":");
                         bool quoted = (v1 > v0 && *v0 == '\"' && *(v1 - 1) == '\"');
                         if (quoted)
                         {
                             Serial.print('\"');
-                            print_escaped(v0 + 1, v1 - 1);
+                            json_print_escaped_range(v0 + 1, v1 - 1);
                             Serial.print('\"');
                         }
                         else
@@ -1070,7 +1067,7 @@ void Console::process()
                             else
                             {
                                 Serial.print('\"');
-                                print_escaped(v0, v1);
+                                json_print_escaped_range(v0, v1);
                                 Serial.print('\"');
                             }
                         }
@@ -1144,42 +1141,15 @@ void Console::process()
                                 ++rs;
                             if (strncmp(rs, "LIST?", 5) == 0)
                             {
-                                // Generate complete PTY list from map
-                                struct P
-                                {
-                                    const char *n;
-                                    uint8_t c;
-                                };
-                                static const P map[] = {{"NONE", 0},
-                                                        {"NEWS", 1},
-                                                        {"INFORMATION", 2},
-                                                        {"SPORT", 3},
-                                                        {"TALK", 4},
-                                                        {"ROCK", 5},
-                                                        {"CLASSIC_ROCK", 6},
-                                                        {"ADULT_HITS", 7},
-                                                        {"SOFT_ROCK", 8},
-                                                        {"TOP_40", 10},
-                                                        {"COUNTRY", 11},
-                                                        {"OLDIES", 13},
-                                                        {"SOFT", 14},
-                                                        {"JAZZ", 15},
-                                                        {"CLASSICAL", 16},
-                                                        {"RNB", 17},
-                                                        {"SOFT_RNB", 18},
-                                                        {"LANGUAGE", 19},
-                                                        {"RELIGIOUS_MUSIC", 20},
-                                                        {"RELIGIOUS_TALK", 21},
-                                                        {"PERSONALITY", 22},
-                                                        {"PUBLIC", 24},
-                                                        {"COLLEGE", 27}};
                                 char list_buf[512];
                                 list_buf[0] = '\0';
-                                for (const auto &e : map)
+                                for (size_t i = 0; i < kPtyMapSize; ++i)
                                 {
                                     char entry[32];
                                     snprintf(entry, sizeof(entry), "%s%u=%s",
-                                             list_buf[0] ? "," : "", e.c, e.n);
+                                             list_buf[0] ? "," : "",
+                                             (unsigned)kPtyMap[i].code,
+                                             kPtyMap[i].long_name);
                                     strncat(list_buf, entry,
                                             sizeof(list_buf) - strlen(list_buf) - 1);
                                 }
@@ -1191,40 +1161,12 @@ void Console::process()
                                 v = (unsigned)strtoul(rs, nullptr, 10);
                             else
                             {
-                                struct P
-                                {
-                                    const char *n;
-                                    uint8_t c;
-                                };
-                                static const P map[] = {{"NONE", 0},
-                                                        {"NEWS", 1},
-                                                        {"INFORMATION", 2},
-                                                        {"SPORT", 3},
-                                                        {"TALK", 4},
-                                                        {"ROCK", 5},
-                                                        {"CLASSIC_ROCK", 6},
-                                                        {"ADULT_HITS", 7},
-                                                        {"SOFT_ROCK", 8},
-                                                        {"TOP_40", 10},
-                                                        {"COUNTRY", 11},
-                                                        {"OLDIES", 13},
-                                                        {"SOFT", 14},
-                                                        {"JAZZ", 15},
-                                                        {"CLASSICAL", 16},
-                                                        {"RNB", 17},
-                                                        {"SOFT_RNB", 18},
-                                                        {"LANGUAGE", 19},
-                                                        {"RELIGIOUS_MUSIC", 20},
-                                                        {"RELIGIOUS_TALK", 21},
-                                                        {"PERSONALITY", 22},
-                                                        {"PUBLIC", 24},
-                                                        {"COLLEGE", 27}};
                                 bool found = false;
-                                for (auto &e : map)
+                                for (size_t i = 0; i < kPtyMapSize; ++i)
                                 {
-                                    if (iequal(rs, e.n))
+                                    if (iequal(rs, kPtyMap[i].long_name))
                                     {
-                                        v = e.c;
+                                        v = kPtyMap[i].code;
                                         found = true;
                                         break;
                                     }
@@ -1408,7 +1350,7 @@ void Console::process()
                         }
                         else
                         {
-                            Serial.print("{\\\"ok\\\":true,\\\"data\\\":{\\\"RTLIST\\\":[");
+                            Serial.print("{\"ok\":true,\"data\":{\"RTLIST\":[");
                             bool first = true;
                             for (std::size_t i = 0; i < RDSAssembler::rtListCount(); ++i)
                             {
@@ -1418,28 +1360,7 @@ void Console::process()
                                     if (!first)
                                         Serial.print(',');
                                     first = false;
-                                    Serial.print('\"');
-                                    for (const char *s = t; *s; ++s)
-                                    {
-                                        char c = *s;
-                                        if (c == '"' || c == '\\')
-                                        {
-                                            Serial.print('\\');
-                                            Serial.print(c);
-                                        }
-                                        else if ((unsigned char)c < 0x20)
-                                        {
-                                            char buf[8];
-                                            snprintf(buf, sizeof(buf), "\\u%04X",
-                                                     (unsigned)(unsigned char)c);
-                                            Serial.print(buf);
-                                        }
-                                        else
-                                        {
-                                            Serial.print(c);
-                                        }
-                                    }
-                                    Serial.print('\"');
+                                    json_print_string(t);
                                 }
                             }
                             Serial.println("]}}");
@@ -1522,29 +1443,8 @@ void Console::process()
                                         if (!first)
                                             Serial.print(',');
                                         first = false;
-                                        // Escape string minimally for JSON
-                                        Serial.print('\"');
-                                        for (const char *s = t; *s; ++s)
-                                        {
-                                            char c = *s;
-                                            if (c == '"' || c == '\\')
-                                            {
-                                                Serial.print('\\');
-                                                Serial.print(c);
-                                            }
-                                            else if ((unsigned char)c < 0x20)
-                                            {
-                                                char buf[8];
-                                                snprintf(buf, sizeof(buf), "\\u%04X",
-                                                         (unsigned)(unsigned char)c);
-                                                Serial.print(buf);
-                                            }
-                                            else
-                                            {
-                                                Serial.print(c);
-                                            }
-                                        }
-                                        Serial.print('\"');
+                                        // Emit quoted JSON string for item
+                                        json_print_string(t);
                                     }
                                 }
                                 Serial.println("]}}");
@@ -1729,9 +1629,23 @@ void Console::process()
                     handled = true;
                     if (iequal(item_tok, "VERS") || iequal(item_tok, "VERSION?"))
                     {
-                        char b[128];
-                        snprintf(b, sizeof(b), "VERSION=%s,BUILD=%s,BUILDTIME=%s %s",
-                                 Config::FIRMWARE_VERSION, __DATE__, __TIME__, "");
+                        // Build ISO-style date/time fields from __DATE__ and __TIME__
+                        auto month_to_num = [](const char *mon) -> int {
+                            static const char* m[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+                            for (int i=0;i<12;++i) if (strncmp(mon,m[i],3)==0) return i+1;
+                            return 1;
+                        };
+                        char mon[4]={0}; int d=0; int y=0;
+                        sscanf(__DATE__, "%3s %d %d", mon, &d, &y);
+                        int mm = month_to_num(mon);
+                        char build[16];
+                        snprintf(build, sizeof(build), "%04d%02d%02d", y, mm, d);
+                        // __TIME__ is HH:MM:SS
+                        char iso[32];
+                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%sZ", y, mm, d, __TIME__);
+                        char b[160];
+                        snprintf(b, sizeof(b), "VERSION=%s,BUILD=%s,BUILDTIME=%s",
+                                 Config::FIRMWARE_VERSION, build, iso);
                         ok_kv(b);
                     }
                     else if (iequal(item_tok, "HELP") || iequal(item_tok, "HELP?"))
@@ -2139,12 +2053,18 @@ bool Console::enqueueRaw(LogLevel level, const char *msg)
     }
     m.text[i] = '\0'; // Ensure null termination
 
-    // ---- Attempt Non-Blocking Enqueue ----
+    // ---- Attempt Non-Blocking Enqueue (drop-oldest semantics) ----
     if (xQueueSend(queue_, &m, 0) != pdTRUE)
     {
-        // Queue full - increment drop counter and return failure
-        dropped_count_++;
-        return false;
+        // Queue full: drop the oldest message to make room, then retry once
+        LogMsg dummy;
+        xQueueReceive(queue_, &dummy, 0);
+        if (xQueueSend(queue_, &m, 0) != pdTRUE)
+        {
+            // Still failed; count as a drop
+            dropped_count_++;
+            return false;
+        }
     }
 
     return true;
@@ -2172,12 +2092,16 @@ bool Console::enqueueFormatted(LogLevel level, const char *fmt, va_list ap)
     // ---- Format Message Text ----
     vsnprintf(m.text, sizeof(m.text), fmt, ap); // Format with bounds checking
 
-    // ---- Attempt Non-Blocking Enqueue ----
+    // ---- Attempt Non-Blocking Enqueue (drop-oldest semantics) ----
     if (xQueueSend(queue_, &m, 0) != pdTRUE)
     {
-        // Queue full - increment drop counter and return failure
-        dropped_count_++;
-        return false;
+        LogMsg dummy;
+        xQueueReceive(queue_, &dummy, 0);
+        if (xQueueSend(queue_, &m, 0) != pdTRUE)
+        {
+            dropped_count_++;
+            return false;
+        }
     }
 
     return true;

@@ -209,6 +209,10 @@ class Console : public ModuleBase
    */
     static bool printfOrSerial(LogLevel level, const char *fmt, ...);
 
+    /** Quick filter to check if a given level should be logged right now.
+     * Returns true during startup, or when not muted and level >= current threshold. */
+    static bool shouldLog(LogLevel level);
+
     /**
      * Returns true once the console task has begun and is running
      * (i.e., queue is created and begin() completed).

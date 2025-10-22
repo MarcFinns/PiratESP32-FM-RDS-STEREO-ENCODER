@@ -137,19 +137,18 @@ PREEMPHASIS_TIME_CONSTANT_US = 50.0f  // 50 µs (EU) or 75 µs (USA)
 ENABLE_PREEMPHASIS = true  // Enable/disable pre-emphasis stage (for testing)
 
 // Multiplex levels
-PILOT_AMP = 0.09f         // Pilot tone amplitude (9%)
-DIFF_AMP = 1.00f          // Stereo difference amplitude (unity)
-RDS_AMP = 0.03f           // RDS injection level (3%)
+PILOT_AMP = 0.09f         // Pilot tone amplitude (~9%)
+DIFF_AMP  = 0.90f         // Stereo difference amplitude
+RDS_AMP   = 0.04f         // RDS injection level (~4%)
 
 // MPX component toggles (for measurements/testing)
-ENABLE_AUDIO = true        // Program audio (L+R and L-R) into MPX
-ENABLE_STEREO_PILOT_19K = true        // 19 kHz pilot tone
-ENABLE_RDS_57K = true          // 57 kHz RDS subcarrier
-ENABLE_STEREO_SUBCARRIER_38K = true // Enable 38 kHz stereo subcarrier (L−R DSB)
-TEST_OUTPUT_CARRIERS = false // If true: Left=19 kHz pilot, Right=38 kHz subcarrier
+ENABLE_AUDIO                   = true // Program audio (L+R and L-R) into MPX
+ENABLE_STEREO_PILOT_19K        = true // 19 kHz pilot tone
+ENABLE_RDS_57K                 = true // 57 kHz RDS subcarrier
+ENABLE_STEREO_SUBCARRIER_38K   = true // 38 kHz stereo subcarrier (L−R DSB)
+TEST_OUTPUT_CARRIERS           = false // If true: Left=19 kHz pilot, Right=38 kHz subcarrier
 
-// Diagnostics
-LEVEL_TAPS_ENABLE = true  // Peak levels at key stages (5 s max)
+// Diagnostics (see Config.h for performance logging cadence)
 
 // Display settings
 VU_DISPLAY_ENABLED = true // Enable/disable TFT display

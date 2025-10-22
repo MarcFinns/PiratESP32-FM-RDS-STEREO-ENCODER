@@ -44,6 +44,7 @@
 #include "Console.h"
 #include "DSP_pipeline.h"
 #include "RDSAssembler.h"
+#include "PtyMap.h"
 
 #include <Arduino.h>
 #include <algorithm>
@@ -54,6 +55,27 @@
 #include <freertos/task.h>
 
 #include <Arduino_GFX_Library.h>
+
+// ----------------------------------------------------------------------------------
+//                      Shared UI Layout Constants (file-scope)
+// ----------------------------------------------------------------------------------
+namespace {
+constexpr int DISPLAY_WIDTH = 320;
+constexpr int DISPLAY_HEIGHT = 240;
+constexpr int MARGIN_X = 16;
+constexpr int VU_BAR_HEIGHT = 22;
+constexpr int VU_BAR_SPACING = 32;
+constexpr int BOTTOM_MARGIN = 8;
+constexpr int VU_Y = DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
+constexpr int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
+constexpr int VU_LABEL_WIDTH = 14;
+constexpr int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
+constexpr int VU_L_Y = VU_Y;
+constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
+constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
+constexpr int PEAK_WIDTH = 3;
+constexpr int PEAK_HEIGHT = VU_BAR_HEIGHT;
+} // namespace
 
 // ==================================================================================
 //                          SINGLETON INSTANCE
@@ -200,21 +222,6 @@ bool DisplayManager::begin()
             // Draw static scale
             auto drawScale = [&]()
             {
-                static constexpr int DISPLAY_WIDTH = 320;
-                static constexpr int DISPLAY_HEIGHT = 240;
-                static constexpr int VU_BAR_HEIGHT = 22;
-                static constexpr int VU_BAR_SPACING = 32;
-                static constexpr int BOTTOM_MARGIN = 8;
-                static constexpr int VU_Y =
-                    DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
-                static constexpr int MARGIN_X = 16;
-                static constexpr int VU_LABEL_WIDTH = 14;
-                static constexpr int VU_L_Y = VU_Y;
-                static constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
-                static constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
-                const int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
-                const int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
-
                 gfx_->fillRect(MARGIN_X, VU_L_Y, VU_WIDTH, (VU_BAR_HEIGHT * 2 + VU_BAR_SPACING),
                                0x0000);
 
@@ -278,9 +285,6 @@ bool DisplayManager::begin()
             drawScale();
             // Static accent dividers (match layout constants used in process())
             {
-                const int DISPLAY_WIDTH = 320;
-                const int MARGIN_X = 16;
-                const int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
                 gfx_->drawFastHLine(MARGIN_X, 50, VU_WIDTH, Config::UI::COLOR_ACCENT);  // under PS
                 gfx_->drawFastHLine(MARGIN_X, 138, VU_WIDTH, Config::UI::COLOR_ACCENT); // above VU
             }
@@ -302,22 +306,6 @@ void DisplayManager::process()
     // ==================================================================================
     //                      DISPLAY HARDWARE & LAYOUT
     // ==================================================================================
-    static constexpr int DISPLAY_WIDTH = 320;
-    static constexpr int DISPLAY_HEIGHT = 240;
-    static constexpr int MARGIN_X = 16;
-    static constexpr int VU_BAR_HEIGHT = 22;
-    static constexpr int VU_BAR_SPACING = 32;
-    static constexpr int BOTTOM_MARGIN = 8;
-    static constexpr int VU_Y =
-        DISPLAY_HEIGHT - (2 * VU_BAR_HEIGHT + VU_BAR_SPACING) - BOTTOM_MARGIN;
-    static constexpr int VU_WIDTH = (DISPLAY_WIDTH - 2 * MARGIN_X);
-    static constexpr int VU_LABEL_WIDTH = 14;
-    static constexpr int VU_BAR_WIDTH = (VU_WIDTH - VU_LABEL_WIDTH);
-    static constexpr int VU_L_Y = VU_Y;
-    static constexpr int VU_R_Y = (VU_L_Y + VU_BAR_HEIGHT + VU_BAR_SPACING);
-    static constexpr int MID_SCALE_Y = (VU_L_Y + VU_BAR_HEIGHT + (VU_BAR_SPACING / 2));
-    static constexpr int PEAK_WIDTH = 3;
-    static constexpr int PEAK_HEIGHT = VU_BAR_HEIGHT;
 
     // ==================================================================================
     //                              COLOR DEFINITIONS (RGB565)
@@ -588,57 +576,8 @@ void DisplayManager::process()
 
                         auto pty_name = [](uint8_t code) -> const char *
                         {
-                            switch (code)
-                            {
-                            case 0:
-                                return "NONE";
-                            case 1:
-                                return "NEWS";
-                            case 2:
-                                return "INFO";
-                            case 3:
-                                return "SPORT";
-                            case 4:
-                                return "TALK";
-                            case 5:
-                                return "ROCK";
-                            case 6:
-                                return "CROCK"; // classic rock
-                            case 7:
-                                return "HITS";
-                            case 8:
-                                return "SROCK"; // soft rock
-                            case 10:
-                                return "TOP40";
-                            case 11:
-                                return "CNTRY";
-                            case 13:
-                                return "OLDIES";
-                            case 14:
-                                return "SOFT";
-                            case 15:
-                                return "JAZZ";
-                            case 16:
-                                return "CLASS";
-                            case 17:
-                                return "RNB";
-                            case 18:
-                                return "SRNB"; // soft rnb
-                            case 19:
-                                return "LANG";
-                            case 20:
-                                return "RELM";
-                            case 21:
-                                return "RELT";
-                            case 22:
-                                return "PERS";
-                            case 24:
-                                return "PUBLIC";
-                            case 27:
-                                return "COLL";
-                            default:
-                                return "UNK";
-                            }
+                            auto e = findPtyByCode(code);
+                            return e ? e->short_label : "UNK";
                         };
 
                         char line[64];

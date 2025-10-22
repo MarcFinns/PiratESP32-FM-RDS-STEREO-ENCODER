@@ -29,7 +29,7 @@
  * Per-Task Profiling:
  *   Tracks CPU% and stack watermarks for:
  *     • audio: Core 0 DSP pipeline (expected 80–95%)
- *     • logger: Core 1 error logging task (expected 5–15%)
+ *     • console: Core 1 console/log task (expected 5–15%)
  *     • vu: Core 1 VU meter display task (expected 2–8%)
  *
  *   Stack watermarks are per-task free stack (in 32-bit words) reported by FreeRTOS.

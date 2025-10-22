@@ -88,13 +88,13 @@ constexpr int SPLASH_HEIGHT = 133;
  */
 namespace UI
 {
-constexpr uint16_t COLOR_BG     = 0x0000; // Black
-constexpr uint16_t COLOR_TEXT   = 0xFFFF; // White
-constexpr uint16_t COLOR_DIM    = 0x7BEF; // Mid gray
+constexpr uint16_t COLOR_BG = 0x0000;     // Black
+constexpr uint16_t COLOR_TEXT = 0xFFFF;   // White
+constexpr uint16_t COLOR_DIM = 0x7BEF;    // Mid gray
 constexpr uint16_t COLOR_ACCENT = 0xFD20; // Amber/Orange accent
-constexpr uint16_t COLOR_GOOD   = 0x07E0; // Green
-constexpr uint16_t COLOR_WARN   = 0xFD20; // Amber/Orange
-constexpr uint16_t COLOR_MUTED  = 0x4208; // Dark gray
+constexpr uint16_t COLOR_GOOD = 0x07E0;   // Green
+constexpr uint16_t COLOR_WARN = 0xFD20;   // Amber/Orange
+constexpr uint16_t COLOR_MUTED = 0x4208;  // Dark gray
 } // namespace UI
 
 // ==================================================================================
