@@ -2,6 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                       RDS Assembler (ModuleBase Implementation)
  *
  * =====================================================================================
@@ -69,11 +70,7 @@ RDSAssembler::RDSAssembler()
         af_codes_[i] = 0;
 }
 
-// ------------------- Rotation state (static) -------------------
-static std::vector<std::string> s_rt_list;
-static uint32_t s_rt_period_s = 30; // default seconds
-static std::size_t s_rt_index = 0;
-static uint64_t s_rt_next_switch_us = 0;
+// (Rotation state moved to class members)
 
 // ==================================================================================
 //                          STATIC WRAPPER API
@@ -392,17 +389,17 @@ void RDSAssembler::process()
     accu_us += 1000;
 
     // Handle RT rotation (pilot task cadence, coarse timer ok)
-    if (!s_rt_list.empty())
+    if (!rt_list_.empty())
     {
         uint64_t now = esp_timer_get_time();
-        if (s_rt_period_s > 0 && now >= s_rt_next_switch_us)
+        if (rt_period_s_ > 0 && now >= rt_next_switch_us_)
         {
-            if (s_rt_index >= s_rt_list.size())
-                s_rt_index = 0;
-            const std::string &cur = s_rt_list[s_rt_index];
+            if (rt_index_ >= rt_list_.size())
+                rt_index_ = 0;
+            const std::string &cur = rt_list_[rt_index_];
             setRT(cur.c_str());
-            s_rt_index = (s_rt_index + 1) % s_rt_list.size();
-            s_rt_next_switch_us = now + (uint64_t)s_rt_period_s * 1000000ULL;
+            rt_index_ = (rt_index_ + 1) % rt_list_.size();
+            rt_next_switch_us_ = now + (uint64_t)rt_period_s_ * 1000000ULL;
         }
     }
 
@@ -491,42 +488,45 @@ void RDSAssembler::rtListAdd(const char *text)
 {
     if (!text)
         return;
-    s_rt_list.emplace_back(text);
-    if (s_rt_list.size() == 1)
+    getInstance().rt_list_.emplace_back(text);
+    if (getInstance().rt_list_.size() == 1)
     {
         // schedule immediate switch to this first item
-        s_rt_index = 0;
-        s_rt_next_switch_us = esp_timer_get_time();
+        getInstance().rt_index_ = 0;
+        getInstance().rt_next_switch_us_ = esp_timer_get_time();
     }
 }
 
 bool RDSAssembler::rtListDel(std::size_t idx)
 {
-    if (idx >= s_rt_list.size())
+    RDSAssembler &r = getInstance();
+    if (idx >= r.rt_list_.size())
         return false;
-    s_rt_list.erase(s_rt_list.begin() + idx);
-    if (s_rt_index >= s_rt_list.size())
-        s_rt_index = 0;
+    r.rt_list_.erase(r.rt_list_.begin() + idx);
+    if (r.rt_index_ >= r.rt_list_.size())
+        r.rt_index_ = 0;
     return true;
 }
 
 void RDSAssembler::rtListClear()
 {
-    s_rt_list.clear();
-    s_rt_index = 0;
-    s_rt_next_switch_us = 0;
+    RDSAssembler &r = getInstance();
+    r.rt_list_.clear();
+    r.rt_index_ = 0;
+    r.rt_next_switch_us_ = 0;
 }
 
 std::size_t RDSAssembler::rtListCount()
 {
-    return s_rt_list.size();
+    return getInstance().rt_list_.size();
 }
 
 bool RDSAssembler::rtListGet(std::size_t idx, char *out, std::size_t out_sz)
 {
-    if (!out || out_sz == 0 || idx >= s_rt_list.size())
+    RDSAssembler &r = getInstance();
+    if (!out || out_sz == 0 || idx >= r.rt_list_.size())
         return false;
-    const auto &s = s_rt_list[idx];
+    const auto &s = r.rt_list_[idx];
     std::size_t n = std::min(out_sz - 1, s.size());
     memcpy(out, s.data(), n);
     out[n] = '\0';
@@ -535,13 +535,14 @@ bool RDSAssembler::rtListGet(std::size_t idx, char *out, std::size_t out_sz)
 
 void RDSAssembler::setRtPeriod(uint32_t seconds)
 {
-    s_rt_period_s = seconds;
-    s_rt_next_switch_us = esp_timer_get_time();
+    RDSAssembler &r = getInstance();
+    r.rt_period_s_ = seconds;
+    r.rt_next_switch_us_ = esp_timer_get_time();
 }
 
 uint32_t RDSAssembler::getRtPeriod()
 {
-    return s_rt_period_s;
+    return getInstance().rt_period_s_;
 }
 
 // =====================================================================================

@@ -2,6 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                    4× Polyphase FIR Upsampler Interface
  *
  * =====================================================================================

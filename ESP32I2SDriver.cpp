@@ -2,6 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                         ESP32 Hardware Driver Implementation
  *
  * =====================================================================================

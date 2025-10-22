@@ -2,6 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *             Serial Console: SCPI-style Command Parser + Log Drainer
  *
  * =====================================================================================
@@ -387,6 +388,804 @@ static inline void json_print_string(const char *s)
         ++p;
     json_print_escaped_range(s, p);
     Serial.print('"');
+}
+
+// -------------------- Parser/response helpers (file-scope) --------------------
+static inline bool str_iequal(const char *a, const char *b)
+{
+    while (*a && *b)
+    {
+        char ca = (*a >= 'a' && *a <= 'z') ? (*a - 32) : *a;
+        char cb = (*b >= 'a' && *b <= 'z') ? (*b - 32) : *b;
+        if (ca != cb)
+            return false;
+        ++a;
+        ++b;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static inline void trim_line(char *s)
+{
+    char *p = s;
+    while (*p == ' ' || *p == '\t')
+        ++p;
+    if (p != s)
+        memmove(s, p, strlen(p) + 1);
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+        s[--n] = '\0';
+}
+
+static inline void next_token_str(const char *&p, char *out, size_t outsz)
+{
+    while (*p == ' ' || *p == '\t' || *p == ':')
+        ++p;
+    if (!*p)
+    {
+        out[0] = '\0';
+        return;
+    }
+    size_t i = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != ':')
+    {
+        if (i < outsz - 1)
+            out[i++] = *p;
+        ++p;
+    }
+    out[i] = '\0';
+}
+
+static inline void parse_quoted_str(const char *&p, char *out, size_t outsz)
+{
+    while (*p == ' ' || *p == '\t')
+        ++p;
+    if (*p == '"')
+    {
+        ++p; // skip opening quote
+        size_t i = 0;
+        while (*p && *p != '"' && i < outsz - 1)
+        {
+            if (*p == '\\' && *(p + 1) != 0)
+                ++p;
+            out[i++] = *p++;
+        }
+        if (*p == '"')
+            ++p;
+        out[i] = '\0';
+        return;
+    }
+    size_t i = 0;
+    while (*p && i < outsz - 1)
+        out[i++] = *p++;
+    out[i] = '\0';
+}
+
+static inline void resp_ok()
+{
+    if (!s_json_mode)
+        Serial.println("OK");
+    else
+        Serial.println("{\"ok\":true}");
+}
+
+static inline void resp_ok_kv(const char *kv)
+{
+    if (!s_json_mode)
+    {
+        Serial.print("OK ");
+        Serial.println(kv ? kv : "");
+        return;
+    }
+    Serial.print("{\"ok\":true,\"data\":{");
+    const char *p = kv ? kv : "";
+    bool first = true;
+    while (*p)
+    {
+        while (*p == ' ')
+            ++p;
+        const char *start = p;
+        bool in_quotes = false;
+        char prev = 0;
+        while (*p)
+        {
+            char c = *p;
+            if (c == '"' && prev != '\\')
+                in_quotes = !in_quotes;
+            if (c == ',' && !in_quotes)
+                break;
+            prev = c;
+            ++p;
+        }
+        const char *end = p;
+        if (*p == ',')
+            ++p;
+        const char *eq = start;
+        in_quotes = false;
+        prev = 0;
+        while (eq < end)
+        {
+            char c = *eq;
+            if (c == '"' && prev != '\\')
+                in_quotes = !in_quotes;
+            if (c == '=' && !in_quotes)
+                break;
+            prev = c;
+            ++eq;
+        }
+        if (eq >= end)
+            continue;
+        const char *k0 = start;
+        while (k0 < eq && *k0 == ' ')
+            ++k0;
+        const char *k1 = eq;
+        while (k1 > k0 && *(k1 - 1) == ' ')
+            --k1;
+        const char *v0 = eq + 1;
+        while (v0 < end && *v0 == ' ')
+            ++v0;
+        const char *v1 = end;
+        while (v1 > v0 && *(v1 - 1) == ' ')
+            --v1;
+        if (k0 >= k1)
+            continue;
+        if (!first)
+            Serial.print(',');
+        first = false;
+        Serial.print('"');
+        json_print_escaped_range(k0, k1);
+        Serial.print("\":");
+        bool quoted = (v1 > v0 && *v0 == '"' && *(v1 - 1) == '"');
+        if (quoted)
+        {
+            Serial.print('"');
+            json_print_escaped_range(v0 + 1, v1 - 1);
+            Serial.print('"');
+        }
+        else
+        {
+            const char *t = v0;
+            bool numeric = true;
+            if (t < v1 && (*t == '+' || *t == '-'))
+                ++t;
+            if (t + 1 < v1 && *t == '0' && (t[1] == 'x' || t[1] == 'X'))
+                numeric = false;
+            else
+            {
+                bool has_digit = false;
+                for (const char *q = t; q < v1; ++q)
+                {
+                    char c = *q;
+                    if ((c >= '0' && c <= '9') || c == '.')
+                    {
+                        has_digit = true;
+                        continue;
+                    }
+                    numeric = false;
+                    break;
+                }
+                if (!has_digit)
+                    numeric = false;
+            }
+            if (numeric)
+                while (v0 < v1)
+                    Serial.print(*v0++);
+            else
+            {
+                Serial.print('"');
+                json_print_escaped_range(v0, v1);
+                Serial.print('"');
+            }
+        }
+    }
+    Serial.println("}}");
+}
+
+static inline void resp_err(const char *msg)
+{
+    if (!s_json_mode)
+    {
+        Serial.print("ERR ");
+        Serial.println(msg ? msg : "UNKNOWN");
+    }
+    else
+    {
+        Serial.print("{\"ok\":false,\"error\":{\"code\":\"");
+        Serial.print(msg ? msg : "UNKNOWN");
+        Serial.println("\",\"message\":\"\"}}");
+    }
+}
+
+// -------------------- Group Handlers --------------------
+// Forward declarations for persistence helpers defined later in this file
+static void conf_open_rw();
+static void conf_close();
+static bool strlist_contains(const String &csv, const char *name);
+static String strlist_remove(const String &csv, const char *name);
+static void conf_build_blob(char *buf, size_t sz);
+static void apply_loaded_blob(const char *blob);
+static void apply_factory_defaults();
+static bool handleRDS(const char *item_tok, const char *rest)
+{
+    if (str_iequal(item_tok, "PI"))
+    {
+        if (!rest || !*rest)
+        {
+            resp_err("MISSING_ARG");
+        }
+        else
+        {
+            unsigned v = 0;
+            if (strncmp(rest, "0x", 2) == 0 || strncmp(rest, "0X", 2) == 0)
+                v = (unsigned)strtoul(rest, nullptr, 16);
+            else
+                v = (unsigned)strtoul(rest, nullptr, 10);
+            RDSAssembler::setPI((uint16_t)(v & 0xFFFF));
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "PI?"))
+    {
+        char b[32];
+        snprintf(b, sizeof(b), "PI=0x%04X", (unsigned)RDSAssembler::getPI());
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "PTY"))
+    {
+        if (!rest || !*rest)
+        {
+            resp_err("MISSING_ARG");
+            return true;
+        }
+        const char *rs = rest;
+        while (*rs == ' ' || *rs == '\t')
+            ++rs;
+        if (strncmp(rs, "LIST?", 5) == 0)
+        {
+            char list_buf[512];
+            list_buf[0] = '\0';
+            for (size_t i = 0; i < kPtyMapSize; ++i)
+            {
+                char entry[32];
+                snprintf(entry, sizeof(entry), "%s%u=%s",
+                         list_buf[0] ? "," : "",
+                         (unsigned)kPtyMap[i].code,
+                         kPtyMap[i].long_name);
+                strncat(list_buf, entry, sizeof(list_buf) - strlen(list_buf) - 1);
+            }
+            resp_ok_kv(list_buf);
+            return true;
+        }
+        unsigned v = 0;
+        if (rs[0] >= '0' && rs[0] <= '9')
+            v = (unsigned)strtoul(rs, nullptr, 10);
+        else
+        {
+            bool found = false;
+            for (size_t i = 0; i < kPtyMapSize; ++i)
+            {
+                if (str_iequal(rs, kPtyMap[i].long_name))
+                {
+                    v = kPtyMap[i].code;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                resp_err("BAD_VALUE");
+                return true;
+            }
+        }
+        RDSAssembler::setPTY((uint8_t)(v & 0x1F));
+        resp_ok();
+        return true;
+    }
+    if (str_iequal(item_tok, "PTY?"))
+    {
+        char b[24];
+        snprintf(b, sizeof(b), "PTY=%u", (unsigned)RDSAssembler::getPTY());
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "TP"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            RDSAssembler::setTP((atoi(rest) != 0));
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "TP?"))
+    {
+        char b[16];
+        snprintf(b, sizeof(b), "TP=%u", (unsigned)RDSAssembler::getTP());
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "TA"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            RDSAssembler::setTA((atoi(rest) != 0));
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "TA?"))
+    {
+        char b[16];
+        snprintf(b, sizeof(b), "TA=%u", (unsigned)RDSAssembler::getTA());
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "MS"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            RDSAssembler::setMS((atoi(rest) != 0));
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "MS?"))
+    {
+        char b[16];
+        snprintf(b, sizeof(b), "MS=%u", (unsigned)RDSAssembler::getMS());
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "PS"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            char buf[128];
+            const char *rp = rest;
+            parse_quoted_str(rp, buf, sizeof(buf));
+            RDSAssembler::setPS(buf);
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "PS?"))
+    {
+        char ps[9] = {0};
+        RDSAssembler::getPS(ps);
+        // Trim trailing spaces for display
+        int n = 7;
+        while (n >= 0 && ps[n] == ' ')
+            ps[n--] = '\0';
+        char b[64];
+        snprintf(b, sizeof(b), "PS=\"%s\"", ps);
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "RT"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            char text[256];
+            const char *rp = rest;
+            parse_quoted_str(rp, text, sizeof(text));
+            RDSAssembler::setRT(text);
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "RT?"))
+    {
+        char rt[65];
+        RDSAssembler::getRT(rt);
+        // Trim trailing spaces
+        for (int i = 63; i >= 0 && rt[i] == ' '; --i)
+            rt[i] = '\0';
+        char b[96];
+        snprintf(b, sizeof(b), "RT=\"%s\"", rt);
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "ENABLE"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            DSP_pipeline::setRdsEnable((atoi(rest) != 0));
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "ENABLE?"))
+    {
+        char b[16];
+        snprintf(b, sizeof(b), "ENABLE=%u", DSP_pipeline::getRdsEnable() ? 1 : 0);
+        resp_ok_kv(b);
+        return true;
+    }
+    if (str_iequal(item_tok, "STATUS?"))
+    {
+        char ps[9] = {0};
+        char rt[65] = {0};
+        RDSAssembler::getPS(ps);
+        RDSAssembler::getRT(rt);
+        int p = 7; while (p >= 0 && ps[p] == ' ') ps[p--] = '\0';
+        int r = 63; while (r >= 0 && rt[r] == ' ') rt[r--] = '\0';
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+                 "PI=0x%04X,PTY=%u,TP=%u,TA=%u,MS=%u,PS=\"%s\",RT=\"%s\",RTAB=%c,ENABLE=%u",
+                 (unsigned)RDSAssembler::getPI(), (unsigned)RDSAssembler::getPTY(),
+                 (unsigned)RDSAssembler::getTP(), (unsigned)RDSAssembler::getTA(),
+                 (unsigned)RDSAssembler::getMS(), ps, rt,
+                 RDSAssembler::getRTAB() ? 'B' : 'A',
+                 DSP_pipeline::getRdsEnable() ? 1 : 0);
+        resp_ok_kv(buf);
+        return true;
+    }
+    if (str_iequal(item_tok, "RTLIST?"))
+    {
+        if (!s_json_mode)
+        {
+            char line[512];
+            line[0] = '\0';
+            bool first = true;
+            for (std::size_t i = 0; i < RDSAssembler::rtListCount(); ++i)
+            {
+                char t[128];
+                if (RDSAssembler::rtListGet(i, t, sizeof(t)))
+                {
+                    char part[160];
+                    snprintf(part, sizeof(part), "%s%u=\"%s\"", first ? "" : ",",
+                             (unsigned)i, t);
+                    strncat(line, part, sizeof(line) - strlen(line) - 1);
+                    first = false;
+                }
+            }
+            resp_ok_kv(line);
+        }
+        else
+        {
+            Serial.print("{\"ok\":true,\"data\":{\"RTLIST\":[");
+            bool first = true;
+            for (std::size_t i = 0; i < RDSAssembler::rtListCount(); ++i)
+            {
+                char t[128];
+                if (RDSAssembler::rtListGet(i, t, sizeof(t)))
+                {
+                    if (!first) Serial.print(',');
+                    first = false;
+                    json_print_string(t);
+                }
+            }
+            Serial.println("]}}");
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "RTLIST"))
+    {
+        char sub[16];
+        sub[0] = '\0';
+        const char *sp2 = rest ? rest : "";
+        next_token_str(sp2, sub, sizeof(sub));
+        if (str_iequal(sub, "ADD"))
+        {
+            if (!sp2 || !*sp2)
+                resp_err("MISSING_ARG");
+            else
+            {
+                char text[512];
+                parse_quoted_str(sp2, text, sizeof(text));
+                RDSAssembler::rtListAdd(text);
+                resp_ok();
+            }
+        }
+        else if (str_iequal(sub, "DEL"))
+        {
+            if (!sp2 || !*sp2)
+                resp_err("MISSING_ARG");
+            else
+            {
+                unsigned idx = (unsigned)strtoul(sp2, nullptr, 10);
+                if (!RDSAssembler::rtListDel(idx))
+                    resp_err("BAD_INDEX");
+                else
+                    resp_ok();
+            }
+        }
+        else if (str_iequal(sub, "CLEAR"))
+        {
+            RDSAssembler::rtListClear();
+            resp_ok();
+        }
+        else if (str_iequal(sub, "?"))
+        {
+            if (!s_json_mode)
+            {
+                char line[512];
+                line[0] = '\0';
+                bool first = true;
+                for (std::size_t i = 0; i < RDSAssembler::rtListCount(); ++i)
+                {
+                    char t[128];
+                    if (RDSAssembler::rtListGet(i, t, sizeof(t)))
+                    {
+                        char part[160];
+                        snprintf(part, sizeof(part), "%s%u=\"%s\"",
+                                 first ? "" : ",", (unsigned)i, t);
+                        strncat(line, part, sizeof(line) - strlen(line) - 1);
+                        first = false;
+                    }
+                }
+                resp_ok_kv(line);
+            }
+            else
+            {
+                Serial.print("{\"ok\":true,\"data\":{\"RTLIST\":[");
+                bool first = true;
+                for (std::size_t i = 0; i < RDSAssembler::rtListCount(); ++i)
+                {
+                    char t[128];
+                    if (RDSAssembler::rtListGet(i, t, sizeof(t)))
+                    {
+                        if (!first) Serial.print(',');
+                        first = false;
+                        json_print_string(t);
+                    }
+                }
+                Serial.println("]}}");
+            }
+        }
+        else
+        {
+            resp_err("Unknown RDS item");
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "RTPERIOD"))
+    {
+        if (!rest || !*rest)
+            resp_err("MISSING_ARG");
+        else
+        {
+            unsigned s = (unsigned)strtoul(rest, nullptr, 10);
+            RDSAssembler::setRtPeriod(s);
+            resp_ok();
+        }
+        return true;
+    }
+    if (str_iequal(item_tok, "RTPERIOD?"))
+    {
+        char b[32];
+        snprintf(b, sizeof(b), "RTPERIOD=%u", (unsigned)RDSAssembler::getRtPeriod());
+        resp_ok_kv(b);
+        return true;
+    }
+    return false;
+}
+
+static bool handleAUDIO(const char *item_tok, const char *rest)
+{
+    if (str_iequal(item_tok, "STEREO"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setStereoEnable(atoi(rest) != 0); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "STEREO?"))
+    {
+        char b[16]; snprintf(b, sizeof(b), "STEREO=%u", DSP_pipeline::getStereoEnable()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "PREEMPH"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setPreemphEnable(atoi(rest) != 0); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "PREEMPH?"))
+    {
+        char b[20]; snprintf(b, sizeof(b), "PREEMPH=%u", DSP_pipeline::getPreemphEnable()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "STATUS?"))
+    {
+        char b[64]; snprintf(b, sizeof(b), "STEREO=%u,PREEMPH=%u",
+                             DSP_pipeline::getStereoEnable()?1:0,
+                             DSP_pipeline::getPreemphEnable()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    return false;
+}
+
+static bool handlePILOT(const char *item_tok, const char *rest)
+{
+    if (str_iequal(item_tok, "ENABLE"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setPilotEnable(atoi(rest) != 0); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "ENABLE?"))
+    {
+        char b[20]; snprintf(b, sizeof(b), "ENABLE=%u", DSP_pipeline::getPilotEnable()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "AUTO"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setPilotAuto(atoi(rest) != 0); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "AUTO?"))
+    {
+        char b[16]; snprintf(b, sizeof(b), "AUTO=%u", DSP_pipeline::getPilotAuto()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "THRESH"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setPilotThresh((float)atof(rest)); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "THRESH?"))
+    {
+        char b[32]; snprintf(b, sizeof(b), "THRESH=%g", (double)DSP_pipeline::getPilotThresh());
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "HOLD"))
+    {
+        if (!rest || !*rest) resp_err("MISSING_ARG");
+        else { DSP_pipeline::setPilotHold((uint32_t)strtoul(rest, nullptr, 10)); resp_ok(); }
+        return true;
+    }
+    if (str_iequal(item_tok, "HOLD?"))
+    {
+        char b[32]; snprintf(b, sizeof(b), "HOLD=%u", (unsigned)DSP_pipeline::getPilotHold());
+        resp_ok_kv(b); return true;
+    }
+    return false;
+}
+
+static bool handleSYST(const char *item_tok, const char *rest)
+{
+    if (str_iequal(item_tok, "VERS") || str_iequal(item_tok, "VERSION?"))
+    {
+        // Use existing version builder
+        auto month_to_num = [](const char *mon) -> int {
+            static const char* m[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+            for (int i=0;i<12;++i) if (strncmp(mon,m[i],3)==0) return i+1; return 1; };
+        char mon[4]={0}; int d=0; int y=0; sscanf(__DATE__, "%3s %d %d", mon, &d, &y);
+        int mm = month_to_num(mon);
+        char build[16]; snprintf(build, sizeof(build), "%04d%02d%02d", y, mm, d);
+        char iso[32]; snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%sZ", y, mm, d, __TIME__);
+        char b[160]; snprintf(b, sizeof(b), "VERSION=%s,BUILD=%s,BUILDTIME=%s",
+                              Config::FIRMWARE_VERSION, build, iso);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "HELP") || str_iequal(item_tok, "HELP?"))
+    {
+        char topic[16]={0}; if (rest && *rest) { const char *rp=rest; next_token_str(rp, topic, sizeof(topic)); }
+        if (topic[0] == '\0') Serial.println("OK TOPICS=RDS,AUDIO,PILOT,SYST");
+        else if (str_iequal(topic, "RDS")) Serial.println("OK RDS PI|PI? PTY|PTY? TP|TP? TA|TA? MS|MS? PS|PS? RT|RT? ENABLE|ENABLE? RTLIST:ADD|DEL|CLEAR|? RTPERIOD|RTPERIOD? STATUS?");
+        else if (str_iequal(topic, "AUDIO")) Serial.println("OK AUDIO STEREO|STEREO? PREEMPH|PREEMPH? STATUS?");
+        else if (str_iequal(topic, "PILOT")) Serial.println("OK PILOT ENABLE|ENABLE? AUTO|AUTO? THRESH|THRESH? HOLD|HOLD?");
+        else if (str_iequal(topic, "SYST")) Serial.println("OK SYST VERSION? STATUS? HEAP? LOG:LEVEL|LOG:LEVEL? COMM:JSON|COMM:JSON? CONF:SAVE|CONF:LOAD|CONF:LIST?|CONF:ACTIVE?|CONF:DELETE CONF:DEFAULT DEFAULTS REBOOT");
+        else Serial.println("OK");
+        return true;
+    }
+    if (str_iequal(item_tok, "LOG"))
+    {
+        char sub[16]={0}; const char *rp = rest ? rest : ""; next_token_str(rp, sub, sizeof(sub));
+        if (str_iequal(sub, "LEVEL"))
+        {
+            char tok[16]={0}; next_token_str(rp, tok, sizeof(tok));
+            if (!tok[0]) resp_err("MISSING_ARG");
+            else if (str_iequal(tok, "OFF"))
+            {
+                if (s_startup_phase) { s_mute_after_startup = true; s_log_mute = false; }
+                else { s_log_mute = true; s_mute_after_startup = false; }
+                resp_ok();
+            }
+            else { s_log_mute = false; if (str_iequal(tok, "ERROR")) s_min_level=LogLevel::ERROR; else if (str_iequal(tok, "WARN")) s_min_level=LogLevel::WARN; else if (str_iequal(tok, "INFO")) s_min_level=LogLevel::INFO; else s_min_level=LogLevel::DEBUG; resp_ok(); }
+            return true;
+        }
+        if (str_iequal(sub, "LEVEL?"))
+        {
+            const char *lvl = s_log_mute?"OFF": (s_min_level==LogLevel::ERROR?"ERROR":(s_min_level==LogLevel::WARN?"WARN":(s_min_level==LogLevel::INFO?"INFO":"DEBUG")));
+            char b[24]; snprintf(b, sizeof(b), "LEVEL=%s", lvl); resp_ok_kv(b); return true;
+        }
+        resp_err("Unknown SYST LOG item"); return true;
+    }
+    if (str_iequal(item_tok, "COMM"))
+    {
+        char sub[16]={0}; const char *rp = rest ? rest : ""; next_token_str(rp, sub, sizeof(sub));
+        if (str_iequal(sub, "JSON"))
+        {
+            char tok[8]={0}; next_token_str(rp, tok, sizeof(tok));
+            if (!tok[0]) resp_err("MISSING_ARG"); else { s_json_mode = (atoi(tok)!=0) || str_iequal(tok, "ON"); resp_ok(); }
+            return true;
+        }
+        if (str_iequal(sub, "JSON?"))
+        { char b[16]; snprintf(b, sizeof(b), "JSON=%u", s_json_mode?1:0); resp_ok_kv(b); return true; }
+        resp_err("Unknown SYST COMM item"); return true;
+    }
+    if (str_iequal(item_tok, "STATUS?"))
+    {
+        float core0=0, core1=0, aud=0, logg=0, vu=0; uint32_t a_sw=0,l_sw=0,v_sw=0;
+        TaskStats::collect(core0, core1, aud, logg, vu, a_sw, l_sw, v_sw);
+        char b[160]; snprintf(b, sizeof(b), "UPTIME=%u,CPU=%.1f,CORE0=%.1f,CORE1=%.1f,HEAP_FREE=%u,HEAP_MIN=%u,STEREO=%u,AUDIO_CLIPPING=0",
+                              (unsigned)(esp_timer_get_time()/1000000ULL), (double)aud, (double)core0, (double)core1,
+                              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), DSP_pipeline::getStereoEnable()?1:0);
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "HEAP?"))
+    {
+        char b[64]; snprintf(b, sizeof(b), "CURRENT_FREE=%u,MIN_FREE=%u", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+        resp_ok_kv(b); return true;
+    }
+    if (str_iequal(item_tok, "CONF"))
+    {
+        char sub[16]={0}; const char *rp = rest ? rest : ""; next_token_str(rp, sub, sizeof(sub));
+        if (str_iequal(sub, "SAVE"))
+        {
+            char name[32] = {0}; if (rp && *rp) { next_token_str(rp, name, sizeof(name)); }
+            if (!*name) strncpy(name, "default", sizeof(name)-1);
+            conf_open_rw(); String list = s_prefs.getString("_list", "");
+            // Build blob
+            char blob[768]; conf_build_blob(blob, sizeof(blob));
+            String key = String("p:") + name;
+            bool ok = s_prefs.putString(key.c_str(), blob);
+            if (ok)
+            {
+                // add to list if missing and set active
+                if (!strlist_contains(list, name)) { list = list.length() ? (list + "," + name) : String(name); s_prefs.putString("_list", list); }
+                s_prefs.putString("_active", name);
+                conf_close(); resp_ok();
+            }
+            else { conf_close(); resp_err("STORE_FAIL"); }
+            return true;
+        }
+        if (str_iequal(sub, "LOAD"))
+        {
+            char name[32]={0}; if (rp && *rp) next_token_str(rp, name, sizeof(name)); if (!*name) strncpy(name, "default", sizeof(name)-1);
+            conf_open_rw(); String key = String("p:") + name; String blob = s_prefs.getString(key.c_str(), "");
+            if (blob.length()>0) { apply_loaded_blob(blob.c_str()); s_prefs.putString("_active", name); conf_close(); resp_ok(); }
+            else { conf_close(); resp_err("NOT_FOUND"); }
+            return true;
+        }
+        if (str_iequal(sub, "LIST?"))
+        {
+            conf_open_rw(); String list = s_prefs.getString("_list", ""); conf_close();
+            if (!s_json_mode) { char out[256]; snprintf(out, sizeof(out), "RTLIST=\"%s\"", list.c_str()); resp_ok_kv(out); }
+            else { Serial.print("{\"ok\":true,\"data\":{\"LIST\":["); bool first=true; int i=0; String acc=""; for (size_t p=0;p<list.length();) { size_t q=list.indexOf(',', p); if (q==(size_t)-1) q=list.length(); String nm=list.substring(p,q); if (!first) Serial.print(','); first=false; json_print_string(nm.c_str()); p=(q<list.length()?q+1:q);} Serial.println("]}}"); }
+            return true;
+        }
+        if (str_iequal(sub, "ACTIVE?"))
+        { conf_open_rw(); String act = s_prefs.getString("_active", ""); conf_close(); char b[64]; snprintf(b, sizeof(b), "ACTIVE=\"%s\"", act.c_str()); resp_ok_kv(b); return true; }
+        if (str_iequal(sub, "DELETE"))
+        {
+            char name[32]={0}; next_token_str(rp, name, sizeof(name)); if (!*name) { resp_err("MISSING_ARG"); return true; }
+            conf_open_rw(); String key = String("p:") + name; bool removed = s_prefs.remove(key.c_str()); String list = s_prefs.getString("_list", ""); list = strlist_remove(list, name); s_prefs.putString("_list", list); String act = s_prefs.getString("_active", ""); if (act == String(name)) s_prefs.putString("_active", ""); conf_close(); if (removed) resp_ok(); else resp_err("NOT_FOUND"); return true;
+        }
+        if (str_iequal(sub, "DEFAULT"))
+        { apply_factory_defaults(); resp_ok(); return true; }
+        resp_err("Unknown SYST CONF item"); return true;
+    }
+    if (str_iequal(item_tok, "DEFAULTS")) { apply_factory_defaults(); resp_ok(); return true; }
+    if (str_iequal(item_tok, "REBOOT")) { resp_ok(); delay(50); ESP.restart(); return true; }
+    return false;
 }
 
 static void conf_open_rw()
@@ -894,7 +1693,7 @@ void Console::process()
             static char line[256];
             strncpy(line, (const char *)line_buf, sizeof(line) - 1);
             line[sizeof(line) - 1] = '\0';
-            trim(line); // Remove leading/trailing whitespace
+            trim_line(line); // Remove leading/trailing whitespace
 
             // next_token(): Extract next space/colon-delimited token from string pointer
             // Advances pointer past the extracted token and any delimiters
@@ -926,8 +1725,8 @@ void Console::process()
             const char *sp = line;
             char group_tok[32]; // GROUP part (e.g., "RDS")
             char item_tok[64];  // ITEM part (e.g., "PI?" or "PI")
-            next_token(sp, group_tok, sizeof(group_tok));
-            next_token(sp, item_tok, sizeof(item_tok));
+            next_token_str(sp, group_tok, sizeof(group_tok));
+            next_token_str(sp, item_tok, sizeof(item_tok));
             const char *rest = sp;
 
             // Trim any remaining leading whitespace from arguments
@@ -1097,6 +1896,20 @@ void Console::process()
             // Route command to appropriate handler based on GROUP and ITEM tokens
             // Each GROUP (RDS, AUDIO, PILOT, SYST) has its own command handlers
 
+            if (group_tok[0] && item_tok[0])
+            {
+                // Modular handlers are authoritative now
+                bool quick = false;
+                if (str_iequal(group_tok, "RDS")) quick = handleRDS(item_tok, rest);
+                else if (str_iequal(group_tok, "AUDIO")) quick = handleAUDIO(item_tok, rest);
+                else if (str_iequal(group_tok, "PILOT")) quick = handlePILOT(item_tok, rest);
+                else if (str_iequal(group_tok, "SYST")) quick = handleSYST(item_tok, rest);
+                if (!quick)
+                {
+                    resp_err("Unknown command");
+                }
+                goto after_parse;
+            }
             if (group_tok[0] && item_tok[0])
             {
                 // ==================================================================================
@@ -1383,7 +2196,7 @@ void Console::process()
                             {
                                 char text[512];
                                 const char *rp = sp2;
-                                parse_quoted(rp, text, sizeof(text));
+                                parse_quoted_str(rp, text, sizeof(text));
                                 RDSAssembler::rtListAdd(text);
                                 ok();
                             }

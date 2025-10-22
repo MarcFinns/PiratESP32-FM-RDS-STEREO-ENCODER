@@ -2,6 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                       RDS Assembler (ModuleBase)
  *
  * =====================================================================================
@@ -37,6 +38,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
+#include <string>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -272,6 +275,12 @@ class RDSAssembler : public ModuleBase
     uint8_t ct_min_;       ///< Local minute 0..59
     bool ct_lto_neg_;      ///< Local time offset sign
     uint8_t ct_lto_hh_;    ///< Local time offset magnitude
+
+    // Rotation list state (was file-static globals)
+    std::vector<std::string> rt_list_;
+    uint32_t rt_period_s_ = 30;
+    std::size_t rt_index_ = 0;
+    uint64_t rt_next_switch_us_ = 0;
 
     // Error Tracking
     volatile uint32_t bit_overflow_count_; ///< Count of bit queue overflows
