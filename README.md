@@ -28,6 +28,8 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 ## Hardware Requirements
 
+The project works with the following components, or even better with the board described in [ESP32 S3 STEREO DSP](https://github.com/MarcFinns/ESP32-S3-STEREO-DSP)
+
 ### ESP32 Board
 - ESP32-S3 with dual-core processor
 - Minimum 520 KB SRAM recommended
