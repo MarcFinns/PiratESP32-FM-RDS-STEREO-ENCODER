@@ -6,7 +6,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 - **Real-time FM Stereo Encoding**: Processes audio stereo input to FM multiplex output, ready to drive any FM transmitter
 - **RDS Support**: Transmits station information (PS, RT, PI, PTY) via RDS protocol
-- **Professional DSP Pipeline**:
+- **Sophisticated DSP Pipeline**:
   - Audio sampling at 24 bit, 48KHz
   - 50 µs pre-emphasis filtering (European FM standard)
   - 19 kHz notch filter to prevent pilot tone interference
