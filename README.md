@@ -67,16 +67,10 @@ CS   (Chip Select):     GPIO 1
 RST  (Reset):           GPIO 2
 ```
 
-## Documentation
+## Additional Documentation
 
-The following documents provide details on the signal chain, software design, hardware wiring, project layout, and the serial console interface.
-
-- docs/DSP_Pipeline.md — Signal path and modulation details
-- docs/Software_Architecture.md — Tasks, cores, queues, modules, patterns
-- docs/Hardware_Setup.md — BOM, wiring, clocks, pins, modes
-- docs/Project_Structure.md — Files and their roles
-- docs/SerialConsole.md — SCPI/JSON CLI (source of truth)
-- docs/Calibration_and_Levels.md — Audio level, pre‑emphasis, pilot, RDS injection, frequency response
+- Software_Architecture.md — Tasks, cores, queues, modules, pattern
+- SerialConsole.md — SCPI/JSON serial CLI (source of truth)
 
 ## Software Architecture
 
