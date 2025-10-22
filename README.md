@@ -13,7 +13,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 - **Runtime Controls (SCPI/JSON)**: Full CLI for RDS, audio, pilot, and system; JSON replies
 - **Profiles (NVS)**: Save/load named configurations via serial console
 - **Pilot Control**: Enable and auto‑mute on silence (threshold/hold configurable)
-- **Configurable Pre‑emphasis**: 50 µs (EU) or 75 µs, toggleable at runtime
+- **Pre‑emphasis**: 50 µs (EU)
 - **Sophisticated DSP Pipeline**:
   - Audio sampling at 24 bit, 48KHz
   - Pre‑emphasis filtering (50/75 µs)
