@@ -59,7 +59,7 @@ namespace Config
  * Semantic version or tag for the firmware build. Update this when making
  * a release so it is reported in SYST:VERSION? and on the splash screen.
  */
-constexpr const char *FIRMWARE_VERSION = "0.1.0";
+constexpr const char *FIRMWARE_VERSION = "1.0.0";
 
 // ==================================================================================
 //                              SPLASH SCREEN SETTINGS
