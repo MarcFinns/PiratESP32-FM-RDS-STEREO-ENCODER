@@ -12,8 +12,9 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
   - 19 kHz notch filter to prevent pilot tone interference
   - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
-  - FM multiplex synthesis with digitally synthesised, phase coherent 19KHz pilot tone and 38 KHz subcarrier
-  - RDS modulation on digitally synthesised 57 KHz subcarrier
+  - Numerically controlled oscillator (NCO) for phase-coherent 19KHz pilot tone, 38 KHz stereo subcarrier, 57 KHz RDS subcarrier
+  - Double sideband suppressed carrier (DSB-SC) modulation of stereo difference signal on digitally synthesised 38 KHz subcarrier
+  - RDS BPSK modulation on digitally synthesised 57 KHz subcarrier
   - Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and BPSK modulated 57 KHz subcarrier
   - MPX audio out via 32 bit DAC at 192 KHz
   
