@@ -16,7 +16,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 - **Pre‑emphasis**: 50 µs (EU)
 - **Sophisticated DSP Pipeline**:
   - Audio sampling at 24 bit, 48KHz
-  - Pre‑emphasis filtering (50/75 µs)
+  - Pre‑emphasis filtering (50 µs)
   - 19 kHz notch filter to prevent pilot tone interference
   - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
