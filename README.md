@@ -15,7 +15,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 - **Pilot Control**: Enable and auto‑mute on silence (threshold/hold configurable)
 - **Pre‑emphasis**: 50 µs (EU)
 - **Sophisticated DSP Pipeline**:
-  - Audio sampling at 24 bit, 48KHz
+  - DMA driven audio sampling at 24 bit, 48KHz
   - Pre‑emphasis filtering (50 µs)
   - 19 kHz notch filter to prevent pilot tone interference
   - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
@@ -26,7 +26,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
   - RDS bitstream differential and Manchester encoding 
   - BPSK modulation of RDS bitstream on digitally synthesised 57 KHz subcarrier
   - Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and BPSK modulated 57 KHz subcarrier
-  - MPX audio out via 32 bit DAC at 192 KHz
+  - DMA driven MPX audio out via 32 bit DAC at 192 KHz
   
 - **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring and RDS data
 - **Dual-Core Architecture**: Four tasks across both cores (DSP/Console/RDS/Display)
