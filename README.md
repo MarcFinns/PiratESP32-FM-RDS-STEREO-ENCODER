@@ -28,7 +28,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
   - Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and BPSK modulated 57 KHz subcarrier
   - MPX audio out via 32 bit DAC at 192 KHz
   
-- **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring
+- **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring and RDS data
 - **Dual-Core Architecture**: Four tasks across both cores (DSP/Console/RDS/Display)
 - **Performance Monitoring**: Real-time CPU usage and audio statistics logging
 
@@ -47,7 +47,7 @@ The project works with the following components, or even better with the board d
 
 ### Display (Optional)
 - ILI9341 320×240 TFT LCD (SPI interface)
-- Used for real-time VU meter visualization and debug messages
+- Used for real-time VU meter visualization of audio levels and RDS data
 
 ## Pin Configuration
 
