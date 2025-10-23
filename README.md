@@ -1,4 +1,4 @@
-# PiratESP32 FM RDS STEREO ENCODER
+# PiratESP32 - DSP BASED RDS STEREO ENCODER FOR FM RADIO
 
 A complete FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 microcontroller. This project processes stereo audio in real-time through a sophisticated 24 bit DSP pipeline leveraging the ESP32-S3 SIMD architecture, to generate broadcast-quality FM multiplex signals.
 
