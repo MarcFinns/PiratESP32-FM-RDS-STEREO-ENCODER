@@ -22,6 +22,8 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
   - Stereo matrix (L+R mono and L-R difference signals)
   - Numerically controlled oscillator (NCO) for phase-coherent 19KHz pilot tone, 38 KHz stereo subcarrier, 57 KHz RDS subcarrier
   - Double sideband suppressed carrier (DSB-SC) modulation of stereo difference signal on digitally synthesised 38 KHz subcarrier
+  - RDS data blocks generation
+  - Bitstream differential and Manchester encoding 
   - RDS BPSK modulation on digitally synthesised 57 KHz subcarrier
   - Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and BPSK modulated 57 KHz subcarrier
   - MPX audio out via 32 bit DAC at 192 KHz
