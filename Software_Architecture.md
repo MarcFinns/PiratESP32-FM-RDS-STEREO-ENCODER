@@ -34,7 +34,7 @@ All cores and priorities are configurable via `Config.h` and verified at startup
 All modules implement a common lifecycle pattern:
 
 ```cpp
-class ModuleBase {
+class TaskBaseClass {
 public:
     // Initialization: allocate resources, setup state
     virtual bool begin() = 0;
