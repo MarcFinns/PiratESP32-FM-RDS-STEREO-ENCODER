@@ -29,7 +29,7 @@
  *     1. Base clock: 160 MHz (from PLL, configurable)
  *     2. MCLK: Base clock ÷ divider = 24.576 MHz
  *     3. BCK: MCLK ÷ 2 (for TX: 12.288 MHz, for RX: 3.072 MHz)
- *     4. LRCK: BCK ÷ 64 (for TX: 192 kHz, for RX: 48 kHz)
+ *     4. LRCK: BCK ÷ 64 (TX: Config::SAMPLE_RATE_DAC, RX: Config::SAMPLE_RATE_ADC)
  *
  * I2S Format:
  *   Standard I2S (Philips format):
@@ -39,11 +39,10 @@
  *     • 32-bit word size (24-bit audio MSB-aligned in 32-bit word)
  *
  * DMA Buffer Management:
- *   Each I2S interface uses 6 DMA buffers of 240 samples each:
- *     • Total buffer: 1440 samples = 2880 bytes per channel
- *     • TX latency: 1440 ÷ 192000 = 7.5 ms
- *     • RX latency: 1440 ÷ 48000 = 30 ms
- *   DMA operates in circular buffer mode, no CPU intervention required.
+ *   TX uses 6 buffers × 256 samples; RX uses 6 buffers × 64 samples:
+ *     • TX total: 1536 samples; latency ≈ 1536 ÷ SAMPLE_RATE_DAC
+ *     • RX total:  384 samples; latency ≈  384 ÷ SAMPLE_RATE_ADC
+ *   DMA operates in circular buffer mode; CPU only services read/write calls.
  *
  * Initialization Order:
  *   1. setupTx() must be called first (generates MCLK)
@@ -98,18 +97,18 @@ namespace AudioIO
         /**
          * I2S Port for TX (DAC Output)
          *
-         * Uses I2S Port 1 (I2S_NUM_1) for 192 kHz stereo output.
+         * Uses I2S Port 0 (I2S_NUM_0) for DAC stereo output.
          * This port generates the 24.576 MHz MCLK shared with RX.
          */
-        const i2s_port_t kI2SPortTx = I2S_NUM_1;
+        const i2s_port_t kI2SPortTx = I2S_NUM_0;
 
         /**
          * I2S Port for RX (ADC Input)
          *
-         * Uses I2S Port 0 (I2S_NUM_0) for 48 kHz stereo input.
+         * Uses I2S Port 1 (I2S_NUM_1) for ADC stereo input.
          * This port shares MCLK from TX port for synchronization.
          */
-        const i2s_port_t kI2SPortRx = I2S_NUM_0;
+        const i2s_port_t kI2SPortRx = I2S_NUM_1;
 
     } // anonymous namespace
 
@@ -118,9 +117,9 @@ namespace AudioIO
     // ==================================================================================
 
     /**
-     * Initialize I2S TX Interface (DAC Output @ 192 kHz)
+     * Initialize I2S TX Interface (DAC Output @ Config::SAMPLE_RATE_DAC)
      *
-     * Configures I2S Port 1 for high-speed stereo output. This function performs:
+     * Configures I2S Port 0 for high-speed stereo output. This function performs:
      *   1. I2S driver installation with DMA buffer configuration
      *   2. GPIO pin assignment for MCLK, BCK, LRCK, and DOUT
      *   3. Diagnostic output to Serial with clock frequencies
@@ -135,72 +134,26 @@ namespace AudioIO
         using namespace Config;
 
         // ---- Log Initialization Start ----
-        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S TX (DAC @ 192kHz)...");
+        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S TX (DAC @ %u Hz)...",
+                                  (unsigned)SAMPLE_RATE_DAC);
 
-        // ---- Configure I2S Driver ----
-        //
-        // i2s_config_t defines the I2S operational parameters.
-        // This struct is passed to i2s_driver_install() to configure hardware.
-
-        i2s_config_t config = {
-            // ---- Operating Mode ----
-            // I2S_MODE_MASTER: ESP32 generates all clocks (MCLK, BCK, LRCK)
-            // I2S_MODE_TX: Transmit mode (data flows ESP32 → DAC)
-            .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX),
-
-            // ---- Sample Rate ----
-            // Sample rate in Hz (192,000 Hz from Config)
-            // Determines LRCK frequency (word select toggles at this rate)
-            .sample_rate = SAMPLE_RATE_DAC,
-
-            // ---- Bit Depth ----
-            // I2S_BITS_PER_SAMPLE_32BIT: 32-bit words on the wire
-            // Actual audio is 24-bit MSB-aligned within 32-bit word
-            .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-
-            // ---- Channel Format ----
-            // I2S_CHANNEL_FMT_RIGHT_LEFT: Stereo (left + right channels)
-            // Data is interleaved: L, R, L, R, ...
-            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-
-            // ---- Communication Format ----
-            // I2S_COMM_FORMAT_STAND_I2S: Standard I2S (Philips format)
-            // Data delayed by 1 BCK from LRCK edge
-            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-
-            // ---- Interrupt Priority ----
-            // ESP_INTR_FLAG_LEVEL1: Low interrupt priority
-            // DMA handles transfers, interrupts only fire on buffer completion
-            .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-
-            // ---- DMA Buffer Configuration ----
-            // dma_buf_count: Number of DMA buffers (6 = triple buffering)
-            // dma_buf_len: Samples per buffer (240 samples = 1.25 ms @ 192 kHz)
-            // Total latency: 6 × 1.25 ms = 7.5 ms
-            .dma_buf_count = 6,
-            .dma_buf_len = 240,
-
-            // ---- Clock Source ----
-            // use_apll: false = use internal PLL (more stable, lower jitter)
-            // true would use APLL (audio PLL) for lower clock noise
-            .use_apll = false,
-
-            // ---- TX Descriptor Auto-Clear ----
-            // tx_desc_auto_clear: true = clear DMA descriptor on underrun
-            // Prevents repeating old audio data if buffer underruns occur
-            .tx_desc_auto_clear = true,
-
-            // ---- MCLK Configuration ----
-            // fixed_mclk: 0 = calculate MCLK from mclk_multiple
-            // mclk_multiple: I2S_MCLK_MULTIPLE_128 = MCLK = 128 × sample_rate
-            //   Result: 192,000 Hz × 128 = 24.576 MHz MCLK
-            .fixed_mclk = 0,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_128,
-
-            // ---- Channel Bit Width ----
-            // I2S_BITS_PER_CHAN_32BIT: 32 bits per channel on the wire
-            .bits_per_chan = I2S_BITS_PER_CHAN_32BIT
-        };
+        // ---- Configure I2S Driver (External I2S DAC) ----
+        i2s_config_t config{};
+        {
+            config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX);
+            config.sample_rate = SAMPLE_RATE_DAC;
+            config.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
+            config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+            config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+            config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+            config.dma_buf_count = 6;
+            config.dma_buf_len = Config::I2S_DMA_LEN_TX;
+            config.use_apll = true;
+            config.tx_desc_auto_clear = true;
+            config.fixed_mclk = 0;
+            config.mclk_multiple = I2S_MCLK_MULTIPLE_128;
+            config.bits_per_chan = I2S_BITS_PER_CHAN_32BIT;
+        }
 
         // ---- Install I2S Driver ----
         //
@@ -214,30 +167,16 @@ namespace AudioIO
             return false;
         }
 
-        // ---- Configure GPIO Pins ----
-        //
-        // i2s_pin_config_t maps I2S signals to physical GPIO pins.
-        // Pin numbers come from Config namespace.
-
-        i2s_pin_config_t pins = {
-            // MCLK output: 24.576 MHz master clock (shared with ADC)
-            .mck_io_num = PIN_MCLK,
-
-            // BCK output: Bit clock (12.288 MHz = 192k × 64 bits per frame)
-            .bck_io_num = PIN_DAC_BCK,
-
-            // WS (LRCK) output: Word select / left-right clock (192 kHz)
-            .ws_io_num = PIN_DAC_LRCK,
-
-            // Data output: Serial audio data to DAC
-            .data_out_num = PIN_DAC_DOUT,
-
-            // Data input: Not used for TX (set to I2S_PIN_NO_CHANGE)
-            .data_in_num = I2S_PIN_NO_CHANGE
-        };
-
-        // ---- Apply Pin Configuration ----
-        ret = i2s_set_pin(kI2SPortTx, &pins);
+        {
+            i2s_pin_config_t pins = {
+                .mck_io_num = PIN_MCLK,
+                .bck_io_num = PIN_DAC_BCK,
+                .ws_io_num = PIN_DAC_LRCK,
+                .data_out_num = PIN_DAC_DOUT,
+                .data_in_num = I2S_PIN_NO_CHANGE
+            };
+            ret = i2s_set_pin(kI2SPortTx, &pins);
+        }
         if (ret != ESP_OK)
         {
             // Pin configuration failed (likely invalid GPIO numbers)
@@ -245,22 +184,22 @@ namespace AudioIO
             return false;
         }
 
+        // Ensure TX engine is running with a clean DMA buffer
+        i2s_zero_dma_buffer(kI2SPortTx);
+        i2s_start(kI2SPortTx);
+
         // ---- Log Success and Clock Frequencies ----
         //
         // Print diagnostic information to help verify correct configuration.
         log_via_logger_or_serial(LogLevel::INFO, "I2S TX initialized successfully");
         log_via_logger_or_serial(LogLevel::INFO, "  Sample Rate: %u Hz", SAMPLE_RATE_DAC);
 
-        // MCLK frequency: 192,000 Hz × 128 = 24.576 MHz
+        // MCLK frequency: SAMPLE_RATE_DAC × 128
         log_via_logger_or_serial(LogLevel::INFO, "  MCLK: %.3f MHz (GPIO%d)",
                                  (SAMPLE_RATE_DAC * 128) / 1'000'000.0f, PIN_MCLK);
 
-        // BCK frequency: 192,000 Hz × 64 = 12.288 MHz
-        // (64 = 32 bits × 2 channels per sample period)
         log_via_logger_or_serial(LogLevel::INFO, "  BCK: %.3f MHz (GPIO%d)",
                                  (SAMPLE_RATE_DAC * 64) / 1'000'000.0f, PIN_DAC_BCK);
-
-        // LRCK frequency: Same as sample rate (192 kHz)
         log_via_logger_or_serial(LogLevel::INFO, "  LRCK: %u Hz (GPIO%d)", SAMPLE_RATE_DAC, PIN_DAC_LRCK);
 
         return true;
@@ -271,9 +210,9 @@ namespace AudioIO
     // ==================================================================================
 
     /**
-     * Initialize I2S RX Interface (ADC Input @ 48 kHz)
+     * Initialize I2S RX Interface (ADC Input @ Config::SAMPLE_RATE_ADC)
      *
-     * Configures I2S Port 0 for stereo input. This function performs:
+     * Configures I2S Port 1 for stereo input. This function performs:
      *   1. I2S driver installation with DMA buffer configuration
      *   2. GPIO pin assignment for BCK, LRCK, and DIN
      *   3. Diagnostic output to Serial with clock frequencies
@@ -290,13 +229,14 @@ namespace AudioIO
         using namespace Config;
 
         // ---- Log Initialization Start ----
-        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S RX (ADC @ 48kHz)...");
+        log_via_logger_or_serial(LogLevel::INFO, "Initializing I2S RX (ADC @ %u Hz)...",
+                                  (unsigned)SAMPLE_RATE_ADC);
 
         // ---- Configure I2S Driver ----
         //
         // Configuration is similar to TX but with key differences:
         //   • Mode: I2S_MODE_RX (receive instead of transmit)
-        //   • Sample rate: 48 kHz (4× slower than TX)
+            //   • Sample rate: SAMPLE_RATE_ADC (typically 1/4 of TX)
         //   • MCLK multiple: 512 (instead of 128) to match shared 24.576 MHz MCLK
 
         i2s_config_t config = {
@@ -306,8 +246,7 @@ namespace AudioIO
             .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX),
 
             // ---- Sample Rate ----
-            // Sample rate in Hz (48,000 Hz from Config)
-            // LRCK toggles at this rate to indicate L/R channels
+            // Input LRCK, from Config::SAMPLE_RATE_ADC (e.g., 44,100 Hz)
             .sample_rate = SAMPLE_RATE_ADC,
 
             // ---- Bit Depth ----
@@ -328,15 +267,13 @@ namespace AudioIO
             .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
 
             // ---- DMA Buffer Configuration ----
-            // dma_buf_count: 6 buffers for triple buffering
-            // dma_buf_len: 240 samples per buffer (5 ms @ 48 kHz)
-            // Total latency: 6 × 5 ms = 30 ms
+            // Align RX buffer length with input DSP block (64 frames).
             .dma_buf_count = 6,
-            .dma_buf_len = 240,
+            .dma_buf_len = Config::I2S_DMA_LEN_RX,
 
             // ---- Clock Source ----
-            // use_apll: false = use internal PLL (same as TX for sync)
-            .use_apll = false,
+            // Use APLL for precise 44.1k-family clocking
+            .use_apll = true,
 
             // ---- TX Descriptor Auto-Clear ----
             // tx_desc_auto_clear: true (unused for RX, but set for consistency)
@@ -344,9 +281,8 @@ namespace AudioIO
 
             // ---- MCLK Configuration ----
             // fixed_mclk: 0 = calculate from mclk_multiple
-            // mclk_multiple: I2S_MCLK_MULTIPLE_512 = MCLK = 512 × sample_rate
-            //   Result: 48,000 Hz × 512 = 24.576 MHz MCLK
-            //   This matches the TX MCLK (192k × 128) for perfect synchronization
+            // mclk_multiple: 512 → MCLK = 512 × sample_rate
+            //   Result: 44,100 × 512 = 22.5792 MHz (matches TX)
             .fixed_mclk = 0,
             .mclk_multiple = I2S_MCLK_MULTIPLE_512,
 
@@ -357,7 +293,7 @@ namespace AudioIO
 
         // ---- Install I2S Driver ----
         //
-        // Allocates DMA buffers and configures I2S Port 0 hardware.
+        // Allocates DMA buffers and configures I2S Port 1 hardware.
         esp_err_t ret = i2s_driver_install(kI2SPortRx, &config, 0, nullptr);
         if (ret != ESP_OK)
         {
@@ -371,20 +307,15 @@ namespace AudioIO
         // Pin assignment for RX interface. Note that MCLK is not configured
         // here because it's already generated by the TX interface.
 
+        // Choose RX pins; on classic ESP32 with internal DAC, avoid GPIO25/26 for RX clocks
+        int rx_bck = PIN_ADC_BCK;
+        int rx_ws  = PIN_ADC_LRCK;
+
         i2s_pin_config_t pins = {
-            // MCLK: Not configured (shared from TX interface)
             .mck_io_num = I2S_PIN_NO_CHANGE,
-
-            // BCK output: Bit clock (3.072 MHz = 48k × 64)
-            .bck_io_num = PIN_ADC_BCK,
-
-            // WS (LRCK) output: Word select (48 kHz)
-            .ws_io_num = PIN_ADC_LRCK,
-
-            // Data output: Not used for RX
+            .bck_io_num = rx_bck,
+            .ws_io_num = rx_ws,
             .data_out_num = I2S_PIN_NO_CHANGE,
-
-            // Data input: Serial audio data from ADC
             .data_in_num = PIN_ADC_DIN
         };
 
@@ -401,15 +332,15 @@ namespace AudioIO
         log_via_logger_or_serial(LogLevel::INFO, "I2S RX initialized successfully");
         log_via_logger_or_serial(LogLevel::INFO, "  Sample Rate: %u Hz", SAMPLE_RATE_ADC);
 
-        // MCLK frequency: 48,000 Hz × 512 = 24.576 MHz (shared from TX)
+        // MCLK frequency: SAMPLE_RATE_ADC × 512
         log_via_logger_or_serial(LogLevel::INFO, "  MCLK: %.3f MHz (from TX GPIO%d)",
                                  (SAMPLE_RATE_ADC * 512) / 1'000'000.0f, PIN_MCLK);
 
-        // BCK frequency: 48,000 Hz × 64 = 3.072 MHz
+        // BCK frequency: SAMPLE_RATE_ADC × 64
         log_via_logger_or_serial(LogLevel::INFO, "  BCK: %.3f MHz (GPIO%d)",
                                  (SAMPLE_RATE_ADC * 64) / 1'000'000.0f, PIN_ADC_BCK);
 
-        // LRCK frequency: Same as sample rate (48 kHz)
+        // LRCK frequency: Same as sample rate (SAMPLE_RATE_ADC)
         log_via_logger_or_serial(LogLevel::INFO, "  LRCK: %u Hz (GPIO%d)", SAMPLE_RATE_ADC, PIN_ADC_LRCK);
 
         return true;
@@ -426,8 +357,8 @@ namespace AudioIO
      * freeing GPIO pins. Hardware peripherals are disabled.
      *
      * Execution Flow:
-     *   1. Uninstall TX driver (I2S Port 1)
-     *   2. Uninstall RX driver (I2S Port 0)
+     *   1. Uninstall TX driver (I2S Port 0)
+     *   2. Uninstall RX driver (I2S Port 1)
      *
      * Note: This function does not return status. It always succeeds, even if
      *       the drivers were not previously installed.
@@ -440,6 +371,65 @@ namespace AudioIO
         // Uninstall RX driver (releases DMA buffers and GPIO pins)
         i2s_driver_uninstall(kI2SPortRx);
     }
+    
+    int getTxPort() { return (int)kI2SPortTx; }
+    int getRxPort() { return (int)kI2SPortRx; }
+
+    void emitHardwareRecap()
+    {
+        using namespace Config;
+        // Emit a neat, multi-line recap with short lines (<= 120 chars)
+        // to avoid truncation by the logger line limit.
+        auto line = [](const char *fmt, auto... args) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), fmt, args...);
+            (void)Console::enqueue(LogLevel::INFO, buf);
+        };
+
+        Console::enqueue(LogLevel::INFO, "");
+        Console::enqueue(LogLevel::INFO, "==================== HARDWARE RECAP ====================");
+#if defined(PROJ_TARGET_ESP32S3)
+        Console::enqueue(LogLevel::INFO, "Target: ESP32-S3");
+#elif defined(PROJ_TARGET_ESP32)
+        Console::enqueue(LogLevel::INFO, "Target: ESP32 (classic)");
+#else
+        Console::enqueue(LogLevel::INFO, "Target: Unknown (defaulted config)");
+#endif
+
+        Console::enqueue(LogLevel::INFO, "-- I2S TX (DAC)");
+        line("  Port: %d (external DAC, I2S slave)", getTxPort());
+        line("  Rate: %u Hz, Bits: sample=32, chan=32", (unsigned)SAMPLE_RATE_DAC);
+        line("  Format: ch=RIGHT_LEFT, comm=I2S, APLL=on, MCLKx=128");
+        line("  Pins: MCLK=GPIO%d, BCK=GPIO%d, LRCK=GPIO%d, DOUT=GPIO%d",
+             PIN_MCLK, PIN_DAC_BCK, PIN_DAC_LRCK, PIN_DAC_DOUT);
+        line("  Clocks: MCLK=%.3f MHz, BCK=%.3f MHz, LRCK=%u Hz",
+             (SAMPLE_RATE_DAC * 128) / 1'000'000.0f,
+             (SAMPLE_RATE_DAC * 64) / 1'000'000.0f,
+             (unsigned)SAMPLE_RATE_DAC);
+        line("  DMA: count=%d, len=%d samples", 6, I2S_DMA_LEN_TX);
+
+        Console::enqueue(LogLevel::INFO, "-- I2S RX (ADC)");
+        line("  Port: %d (external ADC, I2S slave)", getRxPort());
+        line("  Rate: %u Hz, Bits: sample=32, chan=32", (unsigned)SAMPLE_RATE_ADC);
+        line("  Format: ch=RIGHT_LEFT, comm=I2S, APLL=on, MCLKx=512");
+
+        {
+            line("  Pins: MCLK=GPIO%d (from TX), BCK=GPIO%d, LRCK=GPIO%d, DIN=GPIO%d",
+                 PIN_MCLK, PIN_ADC_BCK, PIN_ADC_LRCK, PIN_ADC_DIN);
+        }
+        line("  Clocks: MCLK=%.3f MHz, BCK=%.3f MHz, LRCK=%u Hz",
+             (SAMPLE_RATE_ADC * 512) / 1'000'000.0f,
+             (SAMPLE_RATE_ADC * 64) / 1'000'000.0f,
+             (unsigned)SAMPLE_RATE_ADC);
+        line("  DMA: count=%d, len=%d samples", 6, I2S_DMA_LEN_RX);
+
+        Console::enqueue(LogLevel::INFO, "-- Display (ILI9341 SPI)");
+        line("  Pins: SCK=GPIO%d, MOSI=GPIO%d, DC=GPIO%d, CS=GPIO%d, RST=GPIO%d, BL=%d",
+             TFT_SCK, TFT_MOSI, TFT_DC, TFT_CS, TFT_RST, TFT_BL);
+
+        Console::enqueue(LogLevel::INFO, "========================================================");
+    }
+    
 
 } // namespace AudioIO
 

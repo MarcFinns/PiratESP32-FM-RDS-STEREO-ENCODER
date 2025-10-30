@@ -35,7 +35,7 @@
  *   * Peak markers: Snap to peaks instantly, decay after 1-second hold
  *
  * Communication Pattern:
- *   1. DSP_pipeline (Core 0) calculates peak/RMS levels every 1.33 ms
+ *   1. DSP_pipeline (Core 0) calculates peak/RMS levels every block (~64/SAMPLE_RATE_ADC s)
  *   2. Sends VUMeter::Sample via queue (overwrite if full)
  *   3. VU task (Core 1) reads latest sample every 20 ms (50 FPS)
  *   4. Applies ballistics and renders to ILI9341 display
@@ -106,7 +106,7 @@ class Arduino_GFX;
  *   +3 dBFS = overload/clipping (red zone on VU meter)
  *
  * Usage:
- *   DSP_pipeline fills this structure every 1.33 ms and sends via enqueue().
+ *   DSP_pipeline fills this structure each block (~64/SAMPLE_RATE_ADC s) and sends via enqueue().
  *   VU task reads the latest sample and applies ballistics for display.
  */
 struct VUSample
@@ -276,7 +276,7 @@ class DisplayManager : public TaskBaseClass
      * Enqueue VU Sample (Task Context)
      *
      * Sends a VU meter sample to the display task. This function is called by
-     * DSP_pipeline every 1.33 ms with updated audio level metrics.
+     * DSP_pipeline each block with updated audio level metrics.
      *
      * Mailbox Behavior:
      *   If queue_len = 1 (default), this function implements mailbox semantics:
@@ -441,42 +441,7 @@ class DisplayManager : public TaskBaseClass
     volatile bool sample_overflow_logged_;    ///< First overflow logged flag (prevent spam)
 };
 
-// Backward compatibility aliases for old namespace-based API
-// Backward compatibility aliases
-//using VUMeter = DisplayManager;
-
-namespace DisplayManager_NS
-{
-// Legacy type names - map to new structs
-using Sample = VUSample;
-using StatsSnapshot = VUStatsSnapshot;
-
-// Delegate to class static methods
-inline bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words, size_t queue_len = 1)
-{
-    return DisplayManager::startTask(core_id, priority, stack_words, queue_len);
-}
-
-inline void stopTask()
-{
-    DisplayManager::stopTask();
-}
-
-inline bool enqueue(const Sample &s)
-{
-    return DisplayManager::enqueue(s);
-}
-
-inline bool enqueueFromISR(const Sample &s, BaseType_t *pxHigherPriorityTaskWoken)
-{
-    return DisplayManager::enqueueFromISR(s, pxHigherPriorityTaskWoken);
-}
-
-inline bool enqueueStats(const StatsSnapshot &s)
-{
-    return DisplayManager::enqueueStats(s);
-}
-} // namespace DisplayManager_NS
+// Legacy namespace-based compatibility layer removed
 
 // =====================================================================================
 //                                END OF FILE

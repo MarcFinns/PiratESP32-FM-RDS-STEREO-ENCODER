@@ -31,6 +31,43 @@
 #include <cstdint>
 
 // ==================================================================================
+//                         TARGET PLATFORM DETECTION (CENTRAL)
+// ==================================================================================
+// Define exactly one of PROJ_TARGET_ESP32 or PROJ_TARGET_ESP32S3 for project-wide use.
+// Prefer ESP-IDF's CONFIG_IDF_TARGET_* if available; otherwise use SoC capabilities
+// as a heuristic. Avoid hard errors here to keep Arduino builds smooth.
+
+#if defined(__has_include)
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#if __has_include(<soc/soc_caps.h>)
+#include <soc/soc_caps.h>
+#endif
+#endif
+
+// Manual override hook (can be defined in .ino or build flags)
+// #define PROJ_TARGET_ESP32
+// #define PROJ_TARGET_ESP32S3
+
+#if !defined(PROJ_TARGET_ESP32) && !defined(PROJ_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32)
+#define PROJ_TARGET_ESP32
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define PROJ_TARGET_ESP32S3
+#elif defined(SOC_USB_SERIAL_JTAG_SUPPORTED) && (SOC_USB_SERIAL_JTAG_SUPPORTED == 1)
+// Heuristic: present on ESP32-S3, not on classic ESP32
+#define PROJ_TARGET_ESP32S3
+#pragma message("Detected ESP32-S3 via SOC caps")
+#else
+// Fallback default to keep compilation flowing
+#define PROJ_TARGET_ESP32S3
+#pragma message(                                                                                   \
+    "Unknown target; defaulting to ESP32-S3. Define PROJ_TARGET_ESP32 or PROJ_TARGET_ESP32S3 to override.")
+#endif
+#endif
+
+// ==================================================================================
 //                           DIAGNOSTIC CONFIGURATION
 // ==================================================================================
 
@@ -59,7 +96,7 @@ namespace Config
  * Semantic version or tag for the firmware build. Update this when making
  * a release so it is reported in SYST:VERSION? and on the splash screen.
  */
-constexpr const char *FIRMWARE_VERSION = "1.0.0";
+constexpr const char *FIRMWARE_VERSION = "1.1.0";
 
 // ==================================================================================
 //                              SPLASH SCREEN SETTINGS
@@ -75,7 +112,7 @@ constexpr int SPLASH_TOP_Y = 70;
 /**
  * Splash image height (pixels)
  *
- * Set this to the actual height of the LOGO image in splashscreen.h.
+ * Set this to the actual height of the LOGO image in SplashScreen.h.
  * Width is assumed to be 320 px.
  */
 constexpr int SPLASH_HEIGHT = 133;
@@ -99,15 +136,15 @@ constexpr uint16_t COLOR_MUTED = 0x4208;  // Dark gray
 } // namespace UI
 
 // ==================================================================================
-//                              GPIO PIN ASSIGNMENTS
+//                              INPUT / OUTPUT ASSIGNMENTS
 // ==================================================================================
 //
 // Pin Configuration for I2S Audio Interfaces
 //
 // Hardware Setup:
-//   • MCLK (24.576 MHz) is shared between ADC and DAC
-//   • ADC operates at 48 kHz (MCLK ÷ 512 = 48 kHz)
-//   • DAC operates at 192 kHz (MCLK ÷ 128 = 192 kHz)
+//   • MCLK (e.g., 22.5792/24.576 MHz) is shared between ADC and DAC
+//   • ADC operates at SAMPLE_RATE_ADC (MCLK ÷ 512)
+//   • DAC operates at SAMPLE_RATE_DAC (MCLK ÷ 128)
 //   • Both use standard I2S protocol (Philips format)
 //
 // Pin Usage:
@@ -116,18 +153,88 @@ constexpr uint16_t COLOR_MUTED = 0x4208;  // Dark gray
 //   - DOUT/DIN: Serial audio data (24-bit samples)
 //   - MCLK: Master clock for ADC/DAC synchronization
 
+#if defined(PROJ_TARGET_ESP32)
+
+// ==================================================================================
+// Classic ESP32 I/O configuration
+// ==================================================================================
+// Note: Adjust to your board wiring as needed.
+
+// ---- Master Clock (Shared) ----
+constexpr int PIN_MCLK = 0; // MCLK output (if supported on your module)
+
+// ---- DAC Interface (I2S TX @ SAMPLE_RATE_DAC) ----
+constexpr int PIN_DAC_BCK = 26;  // DAC bit clock (BCK)
+constexpr int PIN_DAC_LRCK = 25; // DAC word select (LRCK / WS)
+constexpr int PIN_DAC_DOUT = 22; // DAC serial data output
+
+// ---- ADC Interface (I2S RX @ SAMPLE_RATE_ADC) ----
+constexpr int PIN_ADC_BCK = 32;  // ADC bit clock (BCK) — shared with DAC BCK
+constexpr int PIN_ADC_LRCK = 33; // ADC word select (LRCK / WS) — shared with DAC LRCK
+constexpr int PIN_ADC_DIN = 34;  // ADC serial data input (input-only pin)
+
+// ---- SPI Pin Assignments for ILI9341 ----
+constexpr int TFT_SCK = 18;  // VSPI SCK
+constexpr int TFT_MOSI = 23; // VSPI MOSI
+constexpr int TFT_DC = 2;    // Data/Command select (adjust as needed)
+constexpr int TFT_CS = 5;    // Chip select (GPIO5 typical)
+constexpr int TFT_RST = 16;  // Hardware reset (adjust as needed)
+constexpr int TFT_BL = -1;   // TFT Backlight Control Pin (-1 if backlight is hard-wired to power)
+
+#elif defined(PROJ_TARGET_ESP32S3)
+
+// ==================================================================================
+// ESP32‑S3 I/O configuration
+// ==================================================================================
 // ---- Master Clock (Shared) ----
 constexpr int PIN_MCLK = 8; // 24.576 MHz MCLK output (shared by ADC and DAC)
 
-// ---- DAC Interface (I2S TX @ 192 kHz) ----
+// ---- DAC Interface (I2S TX @ SAMPLE_RATE_DAC) ----
 constexpr int PIN_DAC_BCK = 9;   // DAC bit clock (BCK)
 constexpr int PIN_DAC_LRCK = 11; // DAC word select (LRCK / WS)
 constexpr int PIN_DAC_DOUT = 10; // DAC serial data output
 
-// ---- ADC Interface (I2S RX @ 48 kHz) ----
+// ---- ADC Interface (I2S RX @ SAMPLE_RATE_ADC) ----
 constexpr int PIN_ADC_BCK = 4;  // ADC bit clock (BCK)
 constexpr int PIN_ADC_LRCK = 6; // ADC word select (LRCK / WS)
 constexpr int PIN_ADC_DIN = 5;  // ADC serial data input
+
+// ---- SPI Pin Assignments for ILI9341 ----
+constexpr int TFT_SCK = 40;  // SPI clock (SCLK)
+constexpr int TFT_MOSI = 41; // SPI data out (MOSI / SDI)
+constexpr int TFT_DC = 42;   // Data/Command select (DC / RS)
+constexpr int TFT_CS = 1;    // Chip select (CS)
+constexpr int TFT_RST = 2;   // Hardware reset (RST)
+constexpr int TFT_BL = -1;   // TFT Backlight Control Pin (-1 if backlight is hard-wired to power)
+
+#endif
+
+// ==================================================================================
+//                       ILI9341 TFT DISPLAY CONFIGURATION
+// ==================================================================================
+
+/**
+ * Enable/Disable VU Display
+ *
+ * Set to false to disable TFT display initialization and rendering.
+ * Useful for testing audio pipeline without display hardware.
+ *
+ * Value: true (display enabled)
+ */
+constexpr bool VU_DISPLAY_ENABLED = true;
+
+/**
+ * Display Rotation
+ *
+ * ILI9341 orientation setting:
+ *   0 = Portrait (240×320)
+ *   1 = Landscape (320×240)
+ *   2 = Portrait flipped
+ *   3 = Landscape flipped
+ *
+ * Value: 1 (landscape mode for horizontal VU bars)
+ */
+constexpr int TFT_ROTATION = 1;
 
 // ==================================================================================
 //                          SAMPLE RATES AND TIMING
@@ -138,9 +245,19 @@ constexpr int PIN_ADC_DIN = 5;  // ADC serial data input
  *
  * The rate at which audio samples are captured from the I2S ADC.
  *
- * Value: 48,000 Hz (48 kHz)
+ * Value: project-specific (typ. 44,100 Hz or 48,000 Hz)
  */
-constexpr uint32_t SAMPLE_RATE_ADC = 48000;
+constexpr uint32_t SAMPLE_RATE_ADC = 44100;
+
+/**
+ * Upsampling Factor
+ *
+ * Ratio between output and input sample rates: DAC / ADC (e.g., 4× when 48→192 kHz)
+ * This determines the polyphase FIR filter configuration.
+ *
+ * Value: 4x upsampling
+ */
+constexpr std::size_t UPSAMPLE_FACTOR = 4;
 
 /**
  * Output Sample Rate (DAC)
@@ -148,19 +265,9 @@ constexpr uint32_t SAMPLE_RATE_ADC = 48000;
  * The rate at which processed audio is output to the I2S DAC.
  * 4x higher than input to accommodate FM multiplex bandwidth (38KHz and 57KHz subcarriers).
  *
- * Value: 192,000 Hz (192 kHz)
+ * Value: 4x ADC sampling rate (typ. 176,400 Hz or 192,000 Hz)
  */
-constexpr uint32_t SAMPLE_RATE_DAC = 192000;
-
-/**
- * Upsampling Factor
- *
- * Ratio between output and input sample rates: DAC / ADC = 192k / 48k = 4
- * This determines the polyphase FIR filter configuration.
- *
- * Value: 4x upsampling
- */
-constexpr std::size_t UPSAMPLE_FACTOR = 4;
+constexpr uint32_t SAMPLE_RATE_DAC = SAMPLE_RATE_ADC * UPSAMPLE_FACTOR;
 
 /**
  * Audio Block Size
@@ -169,8 +276,8 @@ constexpr std::size_t UPSAMPLE_FACTOR = 4;
  * Smaller blocks reduce latency but increase overhead.
  * Larger blocks improve efficiency but increase latency.
  *
- * Current: 64 samples = 1.33 ms @ 48 kHz
- *          (64 samples ÷ 48,000 samples/sec = 0.00133 sec)
+ * Current: 64 samples ≈ 1.45 ms @ 44.1 kHz (scales with SAMPLE_RATE_ADC)
+ *          (64 samples ÷ SAMPLE_RATE_ADC seconds; ≈1.33 ms at 48 kHz)
  */
 constexpr std::size_t BLOCK_SIZE = 64;
 
@@ -200,7 +307,9 @@ constexpr float Q31_FULL_SCALE = 2147483648.0f;
 /**
  * I2S read/write timeouts in milliseconds. Prevents the audio task from blocking
  * indefinitely if a peripheral stalls. Values should exceed a typical block period
- * (≈1.33 ms at 48 kHz, 64 frames), but remain small to preserve real‑time behavior.
+ * (≈64 ÷ SAMPLE_RATE_ADC ms; e.g., ≈1.45 ms at 44.1 kHz),
+ * remain small to preserve
+ * real‑time behavior.
  */
 constexpr uint32_t I2S_READ_TIMEOUT_MS = 5;  // RX timeout per read
 constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
@@ -228,39 +337,50 @@ constexpr uint32_t I2S_WRITE_TIMEOUT_MS = 5; // TX timeout per write
 /** ---- CONSOLE TASK (Serial owner + log draining) ---- */
 /** Console: Core Assignment (0 or 1) */
 constexpr int CONSOLE_CORE = 1; // Core selection for Console task
+
 /** Console: Task Priority */
 constexpr uint32_t CONSOLE_PRIORITY = 2; // Medium priority
+
 /** Console: Stack Size (32-bit words) */
 constexpr uint32_t CONSOLE_STACK_WORDS =
     8192; // 32 KB (increase to avoid stack canary on heavy console parsing)
+
 /** Console: Message Queue Capacity */
 constexpr std::size_t CONSOLE_QUEUE_LEN = 256; // Larger buffer for verbose init
 
 /** ---- VU METER TASK ---- */
 /** VU Meter: Core Assignment (0 or 1) */
 constexpr int VU_CORE = 1; // Core selection for VU task
+
 /** VU Meter: Task Priority */
 constexpr uint32_t VU_PRIORITY = 1; // Low priority
+
 /** VU Meter: Stack Size (32-bit words) */
 constexpr uint32_t VU_STACK_WORDS = 4096; // 16 KB
+
 /** VU Meter: Sample Queue (Mailbox Pattern) */
 constexpr std::size_t VU_QUEUE_LEN = 1; // Mailbox: holds only latest
 
 /** ---- RDS ASSEMBLER TASK ---- */
 /** RDS Assembler: Core Assignment (0 or 1) */
 constexpr int RDS_CORE = 1; // Core selection for RDS assembler
+
 /** RDS Assembler: Task Priority */
 constexpr uint32_t RDS_PRIORITY = 1; // Low priority
+
 /** RDS Assembler: Stack Size (32-bit words) */
 constexpr uint32_t RDS_STACK_WORDS = 4096; // 16 KB
+
 /** RDS Assembler: Bit Queue Capacity */
 constexpr std::size_t RDS_BIT_QUEUE_LEN = 1024; // 1024 bits buffer
 
 /** ---- DSP PIPELINE TASK ---- */
 /** DSP Pipeline: Core Assignment (0 or 1) */
 constexpr int DSP_CORE = 0; // Core selection for DSP pipeline
+
 /** DSP Pipeline: Task Priority */
 constexpr uint32_t DSP_PRIORITY = 6; // Highest priority
+
 /** DSP Pipeline: Stack Size (32-bit words) */
 constexpr uint32_t DSP_STACK_WORDS = 12288; // 48 KB (DSP buffers)
 
@@ -292,10 +412,11 @@ constexpr float PREEMPHASIS_TIME_CONSTANT_US = 50.0f;
  * High-pass leaky differentiator coefficient calculated from time constant.
  * Derived from: α = exp(-1 / (τ × fs))
  *
- * At 48 kHz (input domain): α = exp(-1 / (50e-6 × 48000)) ≈ 0.6592
- * Computed at compile time using a 5th‑order series approximation to avoid
- * pulling non-constexpr math into configuration.
+ * The coefficient depends on the ADC sampling rate (SAMPLE_RATE_ADC) and is
+ * computed at compile time. Implemented via a 5th‑order series approximation
+ * to avoid pulling non‑constexpr math into configuration.
  */
+
 constexpr float exp_approx(float x)
 {
     // 1 + x + x^2/2! + x^3/3! + x^4/4! + x^5/5!
@@ -321,6 +442,8 @@ constexpr float PREEMPHASIS_GAIN = 1.5f;
 //
 // Purpose: Remove any 19 kHz content from the audio signal to prevent
 // interference with the FM stereo pilot tone (which is exactly 19 kHz).
+//
+// The notch filter operates in the ADC domain and uses SAMPLE_RATE_ADC.
 
 /**
  * Notch Filter Center Frequency
@@ -418,7 +541,7 @@ constexpr float SILENCE_RMS_THRESHOLD = 0.002f;
 /**
  * Hold time before muting pilot (milliseconds). Default: 3000 ms (3 seconds)
  */
-constexpr uint32_t SILENCE_HOLD_MS = 2000u;
+constexpr uint32_t SILENCE_HOLD_MS = 3000u;
 
 // ==================================================================================
 //                          PERFORMANCE MONITORING
@@ -444,11 +567,11 @@ constexpr uint64_t STATS_PRINT_INTERVAL_US = 5000000ULL; // 600000000ULL; //
  * How often the DSP_pipeline sends VU sample data to the display task.
  * Faster updates provide more responsive meters but increase queue traffic.
  *
- * Current: 5 ms = 200 Hz update rate
+ * Current: 10 ms = 100 Hz update rate
  *          This is much faster than the display refresh (50 Hz), ensuring
  *          no audio peaks are missed.
  *
- * Value: 5,000 microseconds (5 ms)
+ * Value: 10,000 microseconds (10 ms)
  */
 constexpr uint64_t VU_UPDATE_INTERVAL_US = 10000ULL;
 
@@ -463,54 +586,6 @@ constexpr uint64_t VU_UPDATE_INTERVAL_US = 10000ULL;
  * Value: 1.0 (normalized float full scale)
  */
 constexpr float DBFS_REF = 1.0f;
-
-// ==================================================================================
-//                       ILI9341 TFT DISPLAY CONFIGURATION
-// ==================================================================================
-
-/**
- * Enable/Disable VU Display
- *
- * Set to false to disable TFT display initialization and rendering.
- * Useful for testing audio pipeline without display hardware.
- *
- * Value: true (display enabled)
- */
-constexpr bool VU_DISPLAY_ENABLED = true;
-
-// ---- SPI Pin Assignments for ILI9341 ----
-//
-// Standard SPI interface with separate DC (Data/Command) pin.
-// Uses hardware SPI (VSPI on ESP32) for maximum transfer speed.
-
-constexpr int TFT_SCK = 40;  // SPI clock (SCLK)
-constexpr int TFT_MOSI = 41; // SPI data out (MOSI / SDI)
-constexpr int TFT_DC = 42;   // Data/Command select (DC / RS)
-constexpr int TFT_CS = 1;    // Chip select (CS)
-constexpr int TFT_RST = 2;   // Hardware reset (RST)
-
-/**
- * TFT Backlight Control Pin
- *
- * GPIO pin for controlling display backlight.
- * Set to -1 if backlight is hard-wired to power (always on).
- *
- * Value: -1 (backlight always on)
- */
-constexpr int TFT_BL = -1;
-
-/**
- * Display Rotation
- *
- * ILI9341 orientation setting:
- *   0 = Portrait (240×320)
- *   1 = Landscape (320×240) ← Current setting
- *   2 = Portrait flipped
- *   3 = Landscape flipped
- *
- * Value: 1 (landscape mode for horizontal VU bars)
- */
-constexpr int TFT_ROTATION = 1;
 
 // ==================================================================================
 //                          VU METER CALIBRATION
@@ -680,7 +755,7 @@ constexpr uint32_t I2S_CHANNELS = 2;
  *
  * Master clock divider for DAC output clock generation.
  * MCLK = Sample_Rate × MCLK_Multiple_TX
- * At 192 kHz: 192000 × 128 = 24.576 MHz MCLK
+ * Example: At 192 kHz: 192000 × 128 = 24.576 MHz MCLK
  *
  * Value: 128
  */
@@ -691,7 +766,7 @@ constexpr uint32_t I2S_MCLK_MULTIPLE_TX = 128;
  *
  * Master clock divider for ADC input clock generation.
  * MCLK = Sample_Rate × MCLK_Multiple_RX
- * At 48 kHz: 48000 × 512 = 24.576 MHz MCLK
+ * Example: At 48 kHz: 48000 × 512 = 24.576 MHz MCLK
  *
  * Value: 512
  */
@@ -707,424 +782,20 @@ constexpr uint32_t I2S_MCLK_MULTIPLE_RX = 512;
  */
 constexpr uint32_t I2S_BCK_DIVISOR = 64;
 
-// ==================================================================================
-//                        FREERTOS TASK CONFIGURATION
-// ==================================================================================
-
 /**
- * Console Task Priority
+ * I2S DMA Buffer Lengths (samples per buffer)
  *
- * FreeRTOS priority level for the console task.
- * Higher values = higher priority (can preempt lower-priority tasks)
+ * Align these with DSP block sizes to avoid repeating descriptor rollovers
+ * that can cause periodic artifacts. Revert to previous values (e.g., 240)
+ * if needed.
  *
- * Value: 2 (medium priority, preempts I/O but yields to audio)
+ * TX (DAC): 256 samples → matches 64-frame block × 4× upsample
+ * RX (ADC):  64 samples → matches 64-frame input block
  */
-constexpr uint32_t LOG_TASK_PRIORITY = 2;
+constexpr int I2S_DMA_LEN_TX = 256; // was 240
+constexpr int I2S_DMA_LEN_RX = 64;  // was 240
 
-/**
- * Console Task Stack Size (Words)
- *
- * Memory allocated for console task stack.
- * Sufficient for string formatting and queue operations.
- *
- * Value: 4096 words (16 KB on 32-bit ESP32)
- */
-constexpr uint32_t LOG_TASK_STACK_WORDS = 4096;
-
-/**
- * Console Message Queue Length
- *
- * Maximum number of console log messages that can be queued before drops occur.
- * Drop-on-overflow policy ensures real-time tasks don't block on logging.
- *
- * Value: 128 messages
- */
-constexpr std::size_t LOG_QUEUE_LENGTH = 128;
-
-/**
- * VU Meter Task Priority
- *
- * FreeRTOS priority for display rendering task.
- * Lowest priority as visual updates are non-critical.
- *
- * Value: 1 (low priority, yields to all other tasks)
- */
-constexpr uint32_t VU_TASK_PRIORITY = 1;
-
-/**
- * VU Meter Task Stack Size (Words)
- *
- * Memory for VU meter task (display rendering).
- * Modest stack for graphics operations.
- *
- * Value: 4096 words (16 KB)
- */
-constexpr uint32_t VU_TASK_STACK_WORDS = 4096;
-
-/**
- * VU Meter Queue Length
- *
- * Mailbox-style queue: holds only the latest sample.
- * Old samples are overwritten - only current peak matters.
- *
- * Value: 1 (mailbox pattern)
- */
-constexpr std::size_t VU_QUEUE_LENGTH = 1;
-
-/**
- * RDS Assembler Task Priority
- *
- * FreeRTOS priority for RDS bitstream generation.
- * Low priority as RDS is asynchronous background task.
- *
- * Value: 1 (low priority)
- */
-constexpr uint32_t RDS_TASK_PRIORITY = 1;
-
-/**
- * RDS Assembler Task Stack Size (Words)
- *
- * Memory for RDS assembly and bitstream generation.
- *
- * Value: 4096 words (16 KB)
- */
-constexpr uint32_t RDS_TASK_STACK_WORDS = 4096;
-
-/**
- * RDS Bit Queue Length
- *
- * FIFO queue for RDS bitstream. Bits are strictly sequenced.
- * Pre-generated bits are queued for DSP synthesis.
- *
- * Value: 1024 bits
- */
-constexpr std::size_t RDS_BIT_QUEUE_LENGTH = 1024;
-
-/**
- * DSP Pipeline Task Priority
- *
- * Highest priority - audio processing cannot be interrupted.
- * Real-time constraints demand strict timing.
- *
- * Value: 6 (highest priority)
- */
-constexpr uint32_t DSP_TASK_PRIORITY = 6;
-
-/**
- * DSP Pipeline Task Stack Size (Words)
- *
- * Memory for audio processing buffers and DSP computations.
- * Includes FreeRTOS overhead for context switching.
- *
- * Value: 12288 words (48 KB)
- */
-constexpr uint32_t DSP_TASK_STACK_WORDS = 12288;
-
-// ==================================================================================
-//                          VU METER DISPLAY LAYOUT
-// ==================================================================================
-
-/**
- * Display Width in Pixels
- *
- * ILI9341 screen width (landscape orientation).
- * Used for calculating bar positions and sizes.
- *
- * Value: 320 pixels
- */
-constexpr int VU_DISPLAY_WIDTH = 320;
-
-/**
- * Display Height in Pixels
- *
- * ILI9341 screen height (landscape orientation).
- *
- * Value: 240 pixels
- */
-constexpr int VU_DISPLAY_HEIGHT = 240;
-
-/**
- * VU Meter Horizontal Margin
- *
- * Padding on left and right edges of display.
- * Prevents bars from touching screen edges.
- *
- * Value: 16 pixels
- */
-constexpr int VU_MARGIN_X = 16;
-
-/**
- * VU Meter Y Coordinate (Top Position)
- *
- * Vertical position where VU bars begin.
- * Leaves space at top for title/status.
- *
- * Value: 32 pixels from top
- */
-constexpr int VU_METER_Y = 32;
-
-/**
- * VU Meter Label Width
- *
- * Space reserved for channel labels (L/R).
- * Remainder is available for bar graphics.
- *
- * Value: 14 pixels
- */
-constexpr int VU_LABEL_WIDTH = 14;
-
-/**
- * VU Meter Bar Height
- *
- * Height of each horizontal bar (left and right channels).
- *
- * Value: 22 pixels per bar
- */
-constexpr int VU_BAR_HEIGHT = 22;
-
-/**
- * VU Meter Bar Vertical Spacing
- *
- * Vertical distance between left and right channel bars.
- * Includes bar height plus gap between bars.
- *
- * Value: 32 pixels
- */
-constexpr int VU_BAR_SPACING = 32;
-
-/**
- * VU Meter Peak Indicator Width
- *
- * Width of the peak marker triangle at bar end.
- * Narrow indicator that shows instantaneous peak.
- *
- * Value: 3 pixels
- */
-constexpr int VU_PEAK_WIDTH = 3;
-
-// ==================================================================================
-//                         VU METER COLOR DEFINITIONS (RGB565)
-// ==================================================================================
-//
-// ILI9341 uses RGB565 format: 5 bits red, 6 bits green, 5 bits blue
-// Formula: (R<<11) | (G<<5) | B, where R,G,B are 5, 6, 5 bit values
-//
-
-/** Black (off state) */
-constexpr uint16_t COLOR_BLACK = 0x0000;
-
-/** White (text and reference marks) */
-constexpr uint16_t COLOR_WHITE = 0xFFFF;
-
-/** Dark gray (background/grid) */
-constexpr uint16_t COLOR_DARK_GRAY = 0x4208;
-
-/** Green (nominal signal level -20 to -6 dBFS) */
-constexpr uint16_t COLOR_GREEN = 0x07E0;
-
-/** Yellow (yellow zone -6 to -3 dBFS, caution) */
-constexpr uint16_t COLOR_YELLOW = 0xFFE0;
-
-/** Orange (orange zone -3 to 0 dBFS, warning) */
-constexpr uint16_t COLOR_ORANGE = 0xFD20;
-
-/** Red (red zone 0 to +3 dBFS, clipping risk) */
-constexpr uint16_t COLOR_RED = 0xF800;
-
-// ==================================================================================
-//                       VU METER COLOR ZONE THRESHOLDS
-// ==================================================================================
-//
-// Bar fill zones as percentage of bar width:
-//   0%  - Start of bar (minimum signal)
-//   70% - Green zone ends, yellow zone begins
-//   85% - Yellow zone ends, orange zone begins
-//   95% - Orange zone ends, red zone begins
-//   100% - Full bar (maximum signal/clipping)
-
-/**
- * Green Zone Threshold
- *
- * Percentage of bar width where color transitions from green to yellow.
- * Below this: green (safe)
- * Above this: yellow (caution)
- *
- * Value: 0.70 (70% of bar width)
- */
-constexpr float VU_GREEN_THRESHOLD = 0.70f;
-
-/**
- * Yellow Zone Threshold
- *
- * Percentage of bar width where color transitions from yellow to orange.
- * Below this: yellow (caution)
- * Above this: orange (warning)
- *
- * Value: 0.85 (85% of bar width)
- */
-constexpr float VU_YELLOW_THRESHOLD = 0.85f;
-
-/**
- * Orange Zone Threshold
- *
- * Percentage of bar width where color transitions from orange to red.
- * Below this: orange (warning)
- * Above this: red (clipping risk)
- *
- * Value: 0.95 (95% of bar width)
- */
-constexpr float VU_ORANGE_THRESHOLD = 0.95f;
-
-// ==================================================================================
-//                        VU METER BALLISTICS & DECAY
-// ==================================================================================
-//
-// Peak meter ballistics define how quickly the needle responds to signal changes:
-// - Attack: Speed of upward movement (fast response to peaks)
-// - Release: Speed of downward movement when signal drops
-// - Decay: Gradual fade of peak hold indicator
-//
-
-/**
- * VU Meter Attack Step
- *
- * How much the bar extends upward per update cycle.
- * Higher = faster response to sudden peaks.
- *
- * Value: 50 (aggressive peak tracking)
- */
-constexpr uint16_t VU_ATTACK_STEP = 50;
-
-/**
- * VU Meter Release Step
- *
- * How much the bar retracts per update cycle when signal drops.
- * Lower = smoother fallback, less jittery display.
- *
- * Value: 8 (smooth decay)
- */
-constexpr uint16_t VU_RELEASE_STEP = 8;
-
-/**
- * VU Meter Decay Interval (Milliseconds)
- *
- * How often release step is applied.
- * 16 ms = ~60 Hz update rate.
- *
- * Value: 16 milliseconds
- */
-constexpr uint16_t VU_DECAY_INTERVAL_MS = 16;
-
-/**
- * VU Meter Peak Hold Duration (Milliseconds)
- *
- * How long the peak indicator stays visible before fading.
- * Helps identify brief transient peaks that might otherwise be missed.
- *
- * Value: 1000 milliseconds (1 second)
- */
-constexpr uint16_t VU_PEAK_HOLD_MS = 1000;
-
-/**
- * VU Display Frame Refresh Interval (Milliseconds)
- *
- * Time between successive screen redraws.
- * 20 ms = 50 Hz refresh rate (matches typical LCD rates).
- *
- * Value: 20 milliseconds
- */
-constexpr uint16_t VU_FRAME_INTERVAL_MS = 25;
-
-// ==================================================================================
-//                          VU METER dB SCALE RANGES
-// ==================================================================================
-
-/**
- * VU Meter Minimum dB Scale
- *
- * Lower limit of the dB scale displayed on the meter.
- * Signals below this are clipped to the bottom.
- *
- * Value: -40 dBFS (very quiet signals)
- */
-constexpr float VU_DB_MIN = -40.0f;
-
-/**
- * VU Meter Maximum dB Scale
- *
- * Upper limit of the dB scale displayed on the meter.
- * Signals above this indicate clipping risk.
- *
- * Value: 3 dBFS (just below full-scale, allowing headroom)
- */
-constexpr float VU_DB_MAX = 3.0f;
-
-/**
- * VU Scale Label Minimum
- *
- * Minimum label shown on the dB scale ruler.
- * (Internal scale for rendering reference marks)
- *
- * Value: -20 dBFS
- */
-constexpr float VU_SCALE_LABEL_MIN = -20.0f;
-
-/**
- * VU Scale Label Maximum
- *
- * Maximum label shown on the dB scale ruler.
- *
- * Value: 3 dBFS
- */
-constexpr float VU_SCALE_LABEL_MAX = 3.0f;
-
-// ==================================================================================
-//                          RDS STRING LENGTHS
-// ==================================================================================
-
-/**
- * RDS Program Service (PS) Length
- *
- * Maximum length of station name displayed on radio.
- * FM standard: Exactly 8 ASCII characters.
- *
- * Value: 8 characters
- */
-constexpr std::size_t RDS_PS_LENGTH = 8;
-
-/**
- * RDS RadioText (RT) Maximum Length
- *
- * Maximum length of scrolling text message.
- * FM standard: Up to 64 ASCII characters (two 32-char versions A/B).
- *
- * Value: 64 characters
- */
-constexpr std::size_t RDS_RT_MAX_LENGTH = 64;
-
-/**
- * RDS LPF Baseband Filter Cutoff Frequency
- *
- * Low-pass filter applied to RDS baseband before synthesis.
- * Reduces aliasing and smooths waveform.
- *
- * Value: 2400 Hz
- */
-constexpr float RDS_LPF_CUTOFF_HZ = 2400.0f;
-
-// ==================================================================================
-//                           DSP CLIPPING LIMITS
-// ==================================================================================
-
-/**
- * Soft Clipping Threshold
- *
- * Audio samples above this value are soft-clipped to prevent
- * harsh digital clipping artifacts.
- *
- * Value: 0.9999999f (just below full-scale)
- */
-constexpr float SOFT_CLIP_LIMIT = 0.9999999f;
+// (Duplicate FreeRTOS task/display constants removed — see earlier definitions.)
 
 } // namespace Config
 

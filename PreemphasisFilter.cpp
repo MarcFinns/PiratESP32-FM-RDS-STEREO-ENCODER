@@ -36,7 +36,7 @@
  *
  * Initialization:
  *   Alpha coefficient must be configured via configure() before processing begins.
- *   Typical values at 48 kHz:
+ *   Typical values at ADC rate (e.g., 48 kHz):
  *     • 75 μs pre-emphasis: α ≈ 0.015 (time constant / fs)
  *     • 50 μs pre-emphasis: α ≈ 0.020 (European standard)
  *
@@ -47,7 +47,7 @@
  *
  * Performance:
  *   Per-sample cost: 4 multiplications, 2 additions (~0.1 µs @ ESP32-S3)
- *   Minimal latency: < 1 µs per block @ 48 kHz
+ *   Minimal latency: < 1 µs per block @ ADC rate (e.g., 48 kHz)
  *
  * =====================================================================================
  */

@@ -666,15 +666,11 @@ void DisplayManager::process()
         {
             static uint32_t last_fetch_ms = 0;
             static char ps[9] = {0};
-            static char rt_ui[1024] = {0};
             if (now_ms - last_fetch_ms >= 500)
             {
                 last_fetch_ms = now_ms;
                 RDSAssembler::getPS(ps);
-                // Legacy path kept (not used for marquee building anymore)
-                // s_ui_rt_long may be set by other modules, but marquee is derived from RTLIST.
-                strncpy(rt_ui, s_ui_rt_long, sizeof(rt_ui) - 1);
-                rt_ui[sizeof(rt_ui) - 1] = '\0';
+                // Marquee is derived from RTLIST; s_ui_rt_long is managed via setDisplayRT().
             }
 
             // Layout region and font sizes

@@ -83,9 +83,9 @@ public:
      * This is the main initialization entry point.
      *
      * Initialization Order:
-     *   1. TX peripheral (192 kHz DAC output) - must be first for MCLK stability
+     *   1. TX peripheral (DAC output @ Config::SAMPLE_RATE_DAC) - must be first for MCLK stability
      *   2. Wait ~100 ms for master clock stabilization
-     *   3. RX peripheral (48 kHz ADC input)
+     *   3. RX peripheral (ADC input @ Config::SAMPLE_RATE_ADC)
      *   4. Verify I2S channels are ready for operation
      *
      * Returns:
@@ -139,7 +139,8 @@ public:
      *
      * Blocking Behavior:
      *   • Blocks until DMA buffer contains requested amount of data
-     *   • Typical block time: ~1.33 ms @ 48 kHz (one audio block period)
+     *   • Typical block time: ~64 ÷ SAMPLE_RATE_ADC seconds
+     *     (e.g., ≈1.45 ms @ 44.1 kHz, ≈1.33 ms @ 48 kHz)
      *   • Can timeout if I2S clock is stopped or missing
      *
      * Error Handling:
@@ -175,7 +176,8 @@ public:
      *
      * Blocking Behavior:
      *   • Blocks until DMA buffer has space for requested amount of data
-     *   • Typical block time: ~1.33 ms @ 192 kHz (one audio block period)
+     *   • Typical block time: ~256 ÷ SAMPLE_RATE_DAC seconds
+     *     (e.g., ≈1.45 ms @ 176.4 kHz, ≈1.33 ms @ 192 kHz)
      *   • Underrun if write lags behind DAC consumption
      *
      * Underrun Handling:
@@ -199,7 +201,7 @@ public:
      * Returns the configured I2S RX sample rate in Hz.
      *
      * Returns:
-     *   Sample rate in Hz (e.g., 48000 for 48 kHz)
+     *   Sample rate in Hz (Config::SAMPLE_RATE_ADC)
      *
      * Note: This is informational only. Sample rate is configured at
      *       initialization time and typically cannot be changed at runtime.
@@ -212,7 +214,7 @@ public:
      * Returns the configured I2S TX sample rate in Hz.
      *
      * Returns:
-     *   Sample rate in Hz (e.g., 192000 for 192 kHz)
+     *   Sample rate in Hz (Config::SAMPLE_RATE_DAC)
      *
      * Note: This is informational only. Sample rate is configured at
      *       initialization time and typically cannot be changed at runtime.

@@ -13,7 +13,7 @@
  * Purpose
  *   Produces the RDS bitstream (1187.5 bps) on a non-real-time core. The audio core
  *   reads bits via a non-blocking API and synthesizes the 57 kHz RDS injection
- *   synchronized to the 192 kHz sample clock.
+ *   synchronized to the DAC sample clock (Config::SAMPLE_RATE_DAC).
  *
  * Design
  *   - Runs as a FreeRTOS task pinned to Core 1 (logger/display core)
@@ -28,7 +28,7 @@
  *
  * Threading model
  *   - Producer: Assembler task (Core 1)
- *   - Consumer: DSP_pipeline (Core 0) calls nextBit() from the 192 kHz path
+ *   - Consumer: DSP_pipeline (Core 0) calls nextBit() from the DAC-rate path
  *
  */
 #pragma once
@@ -291,57 +291,7 @@ class RDSAssembler : public TaskBaseClass
     volatile bool bit_overflow_logged_;    ///< First overflow logged flag (prevent spam)
 };
 
-// Backward compatibility namespace wrapper
-namespace RDSAssembler_NS
-{
-inline bool startTask(int core_id, UBaseType_t priority, uint32_t stack_words,
-                      size_t bit_queue_len = 1024)
-{
-    return RDSAssembler::startTask(core_id, priority, stack_words, bit_queue_len);
-}
-
-inline bool nextBit(uint8_t &bit)
-{
-    return RDSAssembler::nextBit(bit);
-}
-
-inline void setPI(uint16_t pi)
-{
-    RDSAssembler::setPI(pi);
-}
-inline void setPTY(uint8_t pty)
-{
-    RDSAssembler::setPTY(pty);
-}
-inline void setTP(bool tp)
-{
-    RDSAssembler::setTP(tp);
-}
-inline void setTA(bool ta)
-{
-    RDSAssembler::setTA(ta);
-}
-inline void setMS(bool music)
-{
-    RDSAssembler::setMS(music);
-}
-inline void setPS(const char *ps)
-{
-    RDSAssembler::setPS(ps);
-}
-inline void setRT(const char *rt)
-{
-    RDSAssembler::setRT(rt);
-}
-inline void setAF_FM(const float *freqs_mhz, size_t count)
-{
-    RDSAssembler::setAF_FM(freqs_mhz, count);
-}
-inline void setClock(int year, int month, int day, int hour, int minute, int8_t offset_half_hours)
-{
-    RDSAssembler::setClock(year, month, day, hour, minute, offset_half_hours);
-}
-} // namespace RDSAssembler_NS
+// Legacy namespace-based wrapper removed
 
 // =====================================================================================
 //                                END OF FILE

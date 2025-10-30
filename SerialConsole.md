@@ -13,6 +13,10 @@ Protocol
   - Booleans accept `0|1` (and `ON|OFF` for set); replies use `0|1`
 - JSON Mode (optional): `SYST:COMM:JSON ON|OFF`, `SYST:COMM:JSON?` (see JSON Mode Details)
 
+Notes
+- Case-insensitive commands and items: `rds:pi`, `RDS:PI`, and `RDS:Pi` are equivalent.
+- Logging can interleave with replies; reduce log level while scripting (see System & Configuration).
+
 Examples
 - `RDS:PI 0x52A1` → `OK`
 - `RDS:PI?` → `OK PI=0x52A1`
@@ -110,7 +114,9 @@ Notes
   - Reset all settings to factory defaults.
 
 Profiles Notes
-- `SYST:CONF:LIST?` in text mode returns a CSV under `LIST="name1,name2"` (some builds may use `RTLIST` as the key; treat both as equivalent). In JSON mode it returns `{ "LIST": ["name1", ...] }`.
+- `SYST:CONF:LIST?` reply keys:
+  - Text mode: `OK RTLIST="name1,name2"` (historical key; treat as the list of profile names)
+  - JSON mode: `{ "ok": true, "data": { "LIST": ["name1", ...] } }`
 
 - `SYST:DEFAULTS`
   - Alias for `SYST:CONF:DEFAULT`. Reset all settings to factory defaults.
@@ -126,9 +132,16 @@ Profiles Notes
 
 - `SYST:REBOOT`
 
+- `SYST:HELP?` | `SYST:HELP RDS` | `SYST:HELP AUDIO` | `SYST:HELP PILOT` | `SYST:HELP SYST`
+  - Returns a concise list of available items for each group.
+
+- `SYST:PIPELINE:RESET`
+  - Soft reset of the audio pipeline (flushes states and DMA, restores pilot amplitude).
+
 - `SYST:HELP?` | `SYST:HELP RDS` | `SYST:HELP AUDIO` | `SYST:HELP SYST`
 
-- `SYST:LOG:LEVEL OFF|ERROR|WARN|INFO` / `SYST:LOG:LEVEL?`
+- `SYST:LOG:LEVEL OFF|ERROR|WARN|INFO|DEBUG` / `SYST:LOG:LEVEL?`
+  - `OFF` mutes background logs (deferred until end of startup); other levels unmute and set threshold
 
 - `SYST:COMM:JSON ON|OFF` / `SYST:COMM:JSON?`
 
@@ -143,9 +156,8 @@ Response Formats
   - Error: `{"ok":false,"error":{"code":"...","message":"..."}}`
 
 Implementation Notes
-- Command parsing is case‑insensitive; both `RDS:PI` and `rds pi` are accepted.
-- For booleans, the parser accepts `ON|OFF` and `0|1`; replies use `0|1`.
-- Length limits: PS=8 chars; broadcast RT=64 chars; rotation items and UI marquee can be long.
+ - For booleans, the parser accepts `ON|OFF` and `0|1`; replies use `0|1`.
+ - Length limits: PS=8 chars; broadcast RT=64 chars; rotation items and UI marquee can be long.
 
 ---
 

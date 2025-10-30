@@ -13,7 +13,7 @@
  * Purpose:
  *   Generates the RDS bitstream (1187.5 bps) on a non-real-time core (Core 1).
  *   The audio core (Core 0) reads bits via a non-blocking API and synthesizes the
- *   57 kHz RDS injection synchronized to the 192 kHz sample clock.
+ *   57 kHz RDS injection synchronized to the DAC sample clock (Config::SAMPLE_RATE_DAC).
  *
  * =====================================================================================
  */

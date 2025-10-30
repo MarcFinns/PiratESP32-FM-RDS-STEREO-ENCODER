@@ -16,7 +16,7 @@
  *   ESP32. It enables real-time diagnostics without halting audio processing.
  *
  * Monitored Tasks and Cores:
- *   • Core 0 (Real-Time Audio): Runs DSP_pipeline at 48 kHz → 192 kHz conversion
+ *   • Core 0 (Real-Time Audio): Runs DSP_pipeline at ADC → DAC conversion
  *   • Core 1 (I/O Services): Runs Console and VUMeter tasks for display/error reporting
  *   • Per-task CPU%: Relative CPU time for named tasks (audio, console, vu)
  *   • Per-task stack: Free stack space (in 32-bit words for ESP32 FreeRTOS)

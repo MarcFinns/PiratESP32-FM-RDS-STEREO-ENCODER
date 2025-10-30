@@ -45,7 +45,7 @@
  *
  * Performance:
  *   • Per-sample cost: 3 sine lookups + 3 linear interpolations + 3 assignments
- *   • Approximately 0.2 µs per harmonic generation @ 192 kHz (ESP32-S3)
+ *   • Approximately 0.2 µs per harmonic generation @ DAC rate (ESP32-S3)
  *   • No floating-point math or conditional branching
  *
  * =====================================================================================
@@ -81,7 +81,7 @@ NCO::NCO(float freq_hz, float sample_rate)
 void NCO::setFrequency(float freq_hz, float sample_rate)
 {
     // Normalized phase increment [0,1) per sample
-    // Example: 19 kHz / 192 kHz = 0.09896 cycles per sample
+    // Example: 19 kHz / SAMPLE_RATE_DAC = cycles per sample
     phase_inc_ = (sample_rate > 0.0f) ? (freq_hz / sample_rate) : 0.0f;
 }
 

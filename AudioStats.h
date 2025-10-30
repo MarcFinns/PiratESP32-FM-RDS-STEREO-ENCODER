@@ -12,7 +12,7 @@
  *
  * Purpose:
  *   This module defines data structures for monitoring and reporting the performance
- *   characteristics of the 8-stage audio processing pipeline (48 kHz input to 192 kHz
+ *   characteristics of the 8-stage audio processing pipeline (ADC input to DAC
  *   output). It tracks per-stage timing (min/max/current), loop counters, and gain
  *   information for diagnostic and performance optimization purposes.
  *
@@ -27,11 +27,11 @@
  *
  * Performance Metrics:
  *   • stage_int_to_float: I2S RX → float conversion
- *   • stage_preemphasis: Pre-emphasis IIR filter (48 kHz)
- *   • stage_notch: 19 kHz notch filter (48 kHz)
+ *   • stage_preemphasis: Pre-emphasis IIR filter (ADC rate)
+ *   • stage_notch: 19 kHz notch filter (ADC rate)
  *   • stage_matrix: Stereo matrix L+R/L-R decomposition
  *   • stage_mpx: FM multiplex signal construction (pilot + subcarrier + RDS)
- *   • stage_upsample: 4× polyphase FIR upsampler (48 kHz → 192 kHz)
+ *   • stage_upsample: 4× polyphase FIR upsampler (ADC → DAC)
  *   • stage_float_to_int: float → I2S TX conversion
  *   • stage_rds: RDS bitstream injection and synthesis
  *

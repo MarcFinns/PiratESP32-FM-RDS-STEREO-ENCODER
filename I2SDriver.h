@@ -13,8 +13,8 @@
  * Purpose:
  *   This module provides a clean interface for initializing and managing the ESP32's
  *   I2S (Inter-IC Sound) peripherals. It handles dual independent I2S interfaces:
- *     • I2S TX (Port 1): 192 kHz stereo output to DAC
- *     • I2S RX (Port 0): 48 kHz stereo input from ADC
+ *     • I2S TX (Port 0): DAC stereo output at Config::SAMPLE_RATE_DAC
+ *     • I2S RX (Port 1): ADC stereo input at Config::SAMPLE_RATE_ADC
  *
  * I2S Architecture:
  *   The ESP32 has two I2S controllers (I2S0 and I2S1), each capable of:
@@ -25,29 +25,29 @@
  *     • DMA-based transfers (zero CPU intervention during transfers)
  *
  * Hardware Configuration:
- *   TX Interface (I2S_NUM_1):
- *     • Sample rate: 192 kHz
+ *   TX Interface (I2S_NUM_0):
+ *     • Sample rate: Config::SAMPLE_RATE_DAC
  *     • Format: 32-bit words (24-bit audio, MSB-aligned)
- *     • MCLK: 24.576 MHz (192k × 128)
- *     • BCK: 12.288 MHz (192k × 64)
- *     • DMA: 6 buffers × 240 samples = 1440 samples total
+ *     • MCLK: SAMPLE_RATE_DAC × 128
+ *     • BCK:  SAMPLE_RATE_DAC × 64
+ *     • DMA: 6 buffers × 256 samples = 1536 samples total
  *
- *   RX Interface (I2S_NUM_0):
- *     • Sample rate: 48 kHz
+ *   RX Interface (I2S_NUM_1):
+ *     • Sample rate: Config::SAMPLE_RATE_ADC
  *     • Format: 32-bit words (24-bit audio, MSB-aligned)
- *     • MCLK: 24.576 MHz (shared from TX, 48k × 512)
- *     • BCK: 3.072 MHz (48k × 64)
- *     • DMA: 6 buffers × 240 samples = 1440 samples total
+ *     • MCLK: SAMPLE_RATE_ADC × 512 (shared from TX)
+ *     • BCK:  SAMPLE_RATE_ADC × 64
+ *     • DMA: 6 buffers × 64 samples = 384 samples total
  *
  * DMA Buffer Strategy:
- *   Buffer count: 6 (provides triple-buffering for TX and RX)
- *   Buffer length: 240 samples (5 ms @ 48 kHz, 1.25 ms @ 192 kHz)
- *   Total latency: ~15 ms @ 48 kHz, ~3.75 ms @ 192 kHz
+ *   Buffer count: 6 (provides deep buffering for TX and RX)
+ *   Buffer length: TX 256 samples, RX 64 samples (match block sizes)
+ *   Total latency: scales with DMA settings and sample rates (TX ≈ 1536/FS, RX ≈ 384/FS)
  *
  * Clock Relationships:
- *   MCLK (24.576 MHz) is the master clock shared between ADC and DAC:
- *     • DAC: 24.576 MHz ÷ 128 = 192 kHz
- *     • ADC: 24.576 MHz ÷ 512 = 48 kHz
+ *   MCLK is the master clock shared between ADC and DAC:
+ *     • MCLK = SAMPLE_RATE_DAC × 128 = SAMPLE_RATE_ADC × 512
+ *     • Relationship example: MCLK = SAMPLE_RATE_DAC × 128 = SAMPLE_RATE_ADC × 512
  *   This ensures perfect sample rate synchronization.
  *
  * =====================================================================================
@@ -66,16 +66,17 @@ namespace AudioIO
     /**
      * Initialize I2S TX Interface (DAC Output)
      *
-     * Configures I2S Port 1 for 192 kHz stereo output. Sets up DMA buffers,
-     * clock generation (MCLK = 24.576 MHz), and GPIO pin assignments.
+     * Configures I2S Port 0 for stereo output at Config::SAMPLE_RATE_DAC.
+     * Sets up DMA buffers, clock generation (MCLK = SAMPLE_RATE_DAC × 128),
+     * and GPIO pin assignments.
      *
      * I2S TX Configuration:
      *   • Mode: Master TX (ESP32 generates all clocks)
-     *   • Sample rate: 192,000 Hz (from Config::SAMPLE_RATE_DAC)
+     *   • Sample rate: from Config::SAMPLE_RATE_DAC (e.g., 176,400 Hz)
      *   • Format: 32-bit words, 24-bit audio, stereo (L/R interleaved)
-     *   • MCLK: 24.576 MHz (192k × 128) on GPIO configured in Config
-     *   • BCK: 12.288 MHz (192k × 32 × 2 channels)
-     *   • LRCK: 192 kHz (word select, toggles L/R)
+     *   • MCLK: SAMPLE_RATE_DAC × 128 on GPIO configured in Config
+     *   • BCK:  SAMPLE_RATE_DAC × 32 × 2 channels
+     *   • LRCK: SAMPLE_RATE_DAC (word select, toggles L/R)
      *   • DMA: 6 buffers × 240 samples (no queues, blocking I/O)
      *
      * Pin Assignment:
@@ -97,16 +98,16 @@ namespace AudioIO
     /**
      * Initialize I2S RX Interface (ADC Input)
      *
-     * Configures I2S Port 0 for 48 kHz stereo input. Sets up DMA buffers
-     * and GPIO pin assignments. MCLK is shared from TX interface.
+     * Configures I2S Port 1 for stereo input at Config::SAMPLE_RATE_ADC.
+     * Sets up DMA buffers and GPIO pin assignments. MCLK is shared from TX.
      *
      * I2S RX Configuration:
      *   • Mode: Master RX (ESP32 generates clocks, ADC is slave)
-     *   • Sample rate: 48,000 Hz (from Config::SAMPLE_RATE_ADC)
+     *   • Sample rate: from Config::SAMPLE_RATE_ADC (e.g., 44,100 Hz)
      *   • Format: 32-bit words, 24-bit audio, stereo (L/R interleaved)
-     *   • MCLK: 24.576 MHz (shared from TX, 48k × 512)
-     *   • BCK: 3.072 MHz (48k × 32 × 2 channels)
-     *   • LRCK: 48 kHz (word select)
+     *   • MCLK: SAMPLE_RATE_ADC × 512 (shared from TX)
+     *   • BCK:  SAMPLE_RATE_ADC × 32 × 2 channels
+     *   • LRCK: SAMPLE_RATE_ADC (word select)
      *   • DMA: 6 buffers × 240 samples (5 ms latency per buffer)
      *
      * Pin Assignment:
@@ -144,6 +145,18 @@ namespace AudioIO
      *       again to resume audio operation.
      */
     void shutdown();
+
+    /**
+     * Emit a single, consolidated recap of I2S and display configuration.
+     * Safe for Arduino/ESP-IDF: uses a single logger enqueue and is intended
+     * to be called before the DSP task starts (no audio impact).
+     */
+    void emitHardwareRecap();
+
+    /** Query configured I2S port numbers (for recap or diagnostics). */
+    int getTxPort();
+    int getRxPort();
+
 
 } // namespace AudioIO
 

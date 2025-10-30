@@ -8,12 +8,13 @@
  * =====================================================================================
  *
  * File:         RDSSynth.cpp
- * Description:  Real-time RDS baseband and modulation kernel at 192 kHz
+ * Description:  Real-time RDS baseband and modulation kernel at DAC sample rate
  *
  * Purpose:
  *   This implementation provides the core RDS signal generation pipeline. It performs
  *   bit-to-symbol Manchester encoding, timing control, baseband filtering, and
- *   up-conversion to 57 kHz in a single real-time block at 192 kHz sample rate.
+ *   up-conversion to 57 kHz in a single real-time block at DAC sample rate
+ *   (Config::SAMPLE_RATE_DAC).
  *
  * Signal Flow:
  *   1. RDS bit fetching (non-blocking from RDSAssembler queue)
@@ -32,7 +33,7 @@
  * Symbol Timing:
  *   Uses normalized phase accumulator [0,1):
  *     sym_phase[n+1] = sym_phase[n] + sym_inc_
- *     sym_inc_ = RDS_SYMBOL_RATE / sample_rate = 1187.5 ÷ 192000
+ *     sym_inc_ = RDS_SYMBOL_RATE / sample_rate (e.g., 1187.5 ÷ SAMPLE_RATE_DAC)
  *   At half (0.5) and full (1.0) phase, symbol transitions occur.
  *
  * Baseband Filtering (Biquad Cascade):
@@ -47,7 +48,7 @@
  *   processing. RDSAssembler::nextBit() is accessed via non-blocking API.
  *
  * Performance:
- *   Per-block cost (512 samples @ 192 kHz):
+ *   Per-block cost (512 samples @ Config::SAMPLE_RATE_DAC):
  *     • Manchester + differential: 512 ops (negligible)
  *     • Biquad filtering: 2 × 512 × 4 = 4096 FLOPS (SIMD accelerated)
  *     • Modulation: 512 multiplications
@@ -65,6 +66,7 @@
 
 #include "dsps_biquad.h"
 #include "dsps_biquad_gen.h"
+#include "DSPCompat.h"
 
 namespace RDSSynth
 {
@@ -78,8 +80,8 @@ void Synth::configure(float sample_rate_hz)
     last_diff_ = 0;
     half_toggle_ = false;
 
-    // Baseband LPF design (two biquads). Target ≈ 2.4 kHz cutoff at 192 kHz.
-    float f = 2400.0f / sample_rate_hz; // normalized cutoff
+    // Baseband LPF design (two biquads). Target ≈ 2.4 kHz cutoff at DAC rate.
+    float f = 2400.0f / sample_rate_hz; // normalized cutoff at DAC rate
     float q = 0.707f;                    // Butterworth‑like
     dsps_biquad_gen_lpf_f32(lpf1_, f, q);
     dsps_biquad_gen_lpf_f32(lpf2_, f, q);
@@ -143,8 +145,8 @@ void Synth::processBlockWithCarrier(const float *carrier57, float amp, float *ou
     }
 
     // 2) Baseband shaping via two cascaded IIR biquads (SIMD via esp‑dsp)
-    dsps_biquad_f32_aes3(bb, bb, (int)samples, lpf1_, w1_);
-    dsps_biquad_f32_aes3(bb, bb, (int)samples, lpf2_, w2_);
+    DSP_BIQUAD_F32(bb, bb, (int)samples, lpf1_, w1_);
+    DSP_BIQUAD_F32(bb, bb, (int)samples, lpf2_, w2_);
 
     // 3) DSB‑SC modulation at 57 kHz using coherent carrier and scaling
     for (std::size_t i = 0; i < samples; ++i)

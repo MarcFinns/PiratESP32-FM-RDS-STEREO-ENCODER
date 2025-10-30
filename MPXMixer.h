@@ -8,7 +8,8 @@
  * =====================================================================================
  *
  * File:         MPXMixer.h
- * Description:  Real-time FM multiplex baseband signal construction at 192 kHz
+ * Description:  Real-time FM multiplex baseband signal construction at DAC rate
+ *               (Config::SAMPLE_RATE_DAC)
  *
  * Purpose:
  *   This module constructs the complete FM stereo multiplex signal by combining:
@@ -35,10 +36,10 @@
  *
  * Thread Safety:
  *   Not thread-safe. Must be called exclusively from Core 0 audio processing task
- *   at 192 kHz block rate. No shared state with other cores.
+ *   at DAC block rate (Config::SAMPLE_RATE_DAC). No shared state with other cores.
  *
  * Processing Rate:
- *   Expects 192 kHz stereo input. One process() call per 192 kHz block.
+ *   Expects DAC-rate stereo input (Config::SAMPLE_RATE_DAC). One process() call per block.
  *
  * =====================================================================================
  */
@@ -62,14 +63,12 @@ public:
     inline float pilotAmp() const { return pilot_amp_; }
 
     /**
-     * Process one 192 kHz block.
+     * Process one DAC-rate block (Config::SAMPLE_RATE_DAC).
      *
      * @param mono                Contiguous (L+R) buffer [samples]
      * @param diff                Contiguous (L-R) buffer [samples]
-     * @param pilot_nco           NCO generating 19 kHz tone
-     * @param subcarrier_nco      NCO generating 38 kHz tone
-     * @param pilot_buffer        Scratch for pilot tone [samples]
-     * @param subcarrier_buffer   Scratch for subcarrier [samples]
+     * @param pilot_buffer        Precomputed 19 kHz tone [samples]
+     * @param subcarrier_buffer   Precomputed 38 kHz tone [samples]
      * @param mpx                 Output MPX buffer [samples]
      * @param samples             Number of mono/diff/MPX samples in this block
      */

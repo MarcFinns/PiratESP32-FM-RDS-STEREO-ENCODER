@@ -39,11 +39,11 @@
  *
  * Thread Safety:
  *   Not thread-safe for concurrent access to the same buffers. Must be called
- *   exclusively from Core 0 audio processing task at 192 kHz block rate.
+ *   exclusively from Core 0 audio processing task at DAC block rate.
  *
  * Performance:
  *   Per-sample pair cost: 1 addition + 1 subtraction = 2 ops
- *   Approximately 0.01 µs per sample pair @ 192 kHz on ESP32-S3 (negligible)
+ *   Approximately 0.01 µs per sample pair @ DAC rate on ESP32-S3 (negligible)
  *   Perfect scaling: zero instruction overhead on compiler vectorization
  *
  * =====================================================================================

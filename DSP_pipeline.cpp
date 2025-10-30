@@ -11,8 +11,8 @@
  * Description:  Implementation of the FM stereo encoding pipeline
  *
  * This file contains the complete implementation of the DSP_pipeline class, which
- * orchestrates the real-time DSP pipeline that converts 48 kHz stereo audio into
- * a 192 kHz FM multiplex (MPX) signal suitable for transmission.
+ * orchestrates the real-time DSP pipeline that converts ADC-rate stereo audio into
+ * a DAC-rate FM multiplex (MPX) signal suitable for transmission.
  *
  * Key Features:
  *   • Real-time audio processing with strict timing constraints
@@ -22,27 +22,27 @@
  *   • Optional diagnostic logging for debugging
  *
  * Processing Flow:
- *   ADC (48 kHz) → Pre-emphasis → Notch Filter → Upsample (192 kHz) →
- *   Stereo Matrix → NCO Carriers → MPX Synthesis → RDS Injection → DAC (192 kHz)
+ *   ADC → Pre-emphasis → Notch Filter → Upsample →
+ *   Stereo Matrix → NCO Carriers → MPX Synthesis → RDS Injection → DAC
  *
  * =====================================================================================
  */
 
 #include "DSP_pipeline.h"
-#include "Diagnostics.h"
-#include "TaskBaseClass.h"
-#include "ErrorHandler.h"
+
 #include "Console.h"
-#include "RDSSynth.h"
-#include "TaskStats.h"
 #include "DisplayManager.h"
+#include "ErrorHandler.h"
 #include "RDSAssembler.h"
+#include "RDSSynth.h"
+#include "TaskBaseClass.h"
+#include "TaskStats.h"
 
 #include <Arduino.h>
 #include <esp32-hal-cpu.h>
+#include <esp_err.h>
 #include <esp_timer.h>
 #include <freertos/task.h>
-#include <esp_err.h>
 
 #include <algorithm>
 #include <cmath>
@@ -63,7 +63,7 @@
  *                     (e.g., ESP32I2SDriver instance)
  *
  * Initialization:
- *   • pilot_19k_: NCO configured for 19 kHz pilot at 192 kHz sample rate
+ *   • pilot_19k_: NCO configured for 19 kHz pilot at DAC sample rate (Config::SAMPLE_RATE_DAC)
  *   • mpx_synth_: MPX mixer with pilot and stereo difference amplitudes
  *   • stats_: Performance statistics tracker (reset to zero)
  *   • hardware_driver_: Stored for use in begin() and process()
@@ -80,6 +80,11 @@ DSP_pipeline::DSP_pipeline(IHardwareDriver *hardware_driver)
     stats_.reset();
 }
 
+void DSP_pipeline::requestReset()
+{
+    reset_requested_ = true;
+}
+
 // ---------------- Runtime control state ----------------
 static volatile bool s_rds_enable = Config::ENABLE_RDS_57K;
 static volatile bool s_stereo_enable = Config::ENABLE_STEREO_SUBCARRIER_38K;
@@ -93,20 +98,62 @@ static volatile uint32_t s_pilot_hold_ms = Config::SILENCE_HOLD_MS;
 // direct access to the DSP_pipeline instance. Updated in process().
 bool g_dsp_pilot_muted_shadow = false;
 
-void DSP_pipeline::setStereoEnable(bool en) { s_stereo_enable = en; }
-bool DSP_pipeline::getStereoEnable() { return s_stereo_enable; }
-void DSP_pipeline::setRdsEnable(bool en) { s_rds_enable = en; }
-bool DSP_pipeline::getRdsEnable() { return s_rds_enable; }
-void DSP_pipeline::setPreemphEnable(bool en) { s_preemph_enable = en; }
-bool DSP_pipeline::getPreemphEnable() { return s_preemph_enable; }
-void DSP_pipeline::setPilotAuto(bool en) { s_pilot_auto = en; }
-bool DSP_pipeline::getPilotAuto() { return s_pilot_auto; }
-void DSP_pipeline::setPilotThresh(float thr) { s_pilot_thresh = thr; }
-float DSP_pipeline::getPilotThresh() { return s_pilot_thresh; }
-void DSP_pipeline::setPilotHold(uint32_t ms) { s_pilot_hold_ms = ms; }
-uint32_t DSP_pipeline::getPilotHold() { return s_pilot_hold_ms; }
-void DSP_pipeline::setPilotEnable(bool en) { s_pilot_enable = en; }
-bool DSP_pipeline::getPilotEnable() { return s_pilot_enable; }
+void DSP_pipeline::setStereoEnable(bool en)
+{
+    s_stereo_enable = en;
+}
+bool DSP_pipeline::getStereoEnable()
+{
+    return s_stereo_enable;
+}
+void DSP_pipeline::setRdsEnable(bool en)
+{
+    s_rds_enable = en;
+}
+bool DSP_pipeline::getRdsEnable()
+{
+    return s_rds_enable;
+}
+void DSP_pipeline::setPreemphEnable(bool en)
+{
+    s_preemph_enable = en;
+}
+bool DSP_pipeline::getPreemphEnable()
+{
+    return s_preemph_enable;
+}
+void DSP_pipeline::setPilotAuto(bool en)
+{
+    s_pilot_auto = en;
+}
+bool DSP_pipeline::getPilotAuto()
+{
+    return s_pilot_auto;
+}
+void DSP_pipeline::setPilotThresh(float thr)
+{
+    s_pilot_thresh = thr;
+}
+float DSP_pipeline::getPilotThresh()
+{
+    return s_pilot_thresh;
+}
+void DSP_pipeline::setPilotHold(uint32_t ms)
+{
+    s_pilot_hold_ms = ms;
+}
+uint32_t DSP_pipeline::getPilotHold()
+{
+    return s_pilot_hold_ms;
+}
+void DSP_pipeline::setPilotEnable(bool en)
+{
+    s_pilot_enable = en;
+}
+bool DSP_pipeline::getPilotEnable()
+{
+    return s_pilot_enable;
+}
 
 bool DSP_pipeline::getPilotActive()
 {
@@ -131,9 +178,9 @@ bool DSP_pipeline::getPilotActive()
  *
  * Initialization Sequence:
  *   1. Verify SIMD support (ESP32-S3 specific optimization checks)
- *   2. Initialize I2S TX (192 kHz DAC output)
+ *   2. Initialize I2S TX (DAC output @ Config::SAMPLE_RATE_DAC)
  *   3. Wait 100 ms for master clock (MCLK) to stabilize
- *   4. Initialize I2S RX (48 kHz ADC input)
+ *   4. Initialize I2S RX (ADC input @ Config::SAMPLE_RATE_ADC)
  *   5. Configure pre-emphasis filter (50 µs time constant)
  *   6. Configure 19 kHz notch filter
  *   7. Initialize polyphase FIR upsampler (load coefficients)
@@ -151,28 +198,27 @@ bool DSP_pipeline::getPilotActive()
  */
 bool DSP_pipeline::begin()
 {
-    // Log system configuration
-    Console::enqueue(LogLevel::INFO, "ESP32-S3 Audio DSP: 48kHz -> 192kHz");
+    // Log system configuration (use configured rates)
+    Console::enqueuef(LogLevel::INFO, "ESP32-S3 Audio DSP: %u Hz -> %u Hz",
+                      (unsigned)Config::SAMPLE_RATE_ADC, (unsigned)Config::SAMPLE_RATE_DAC);
     Console::enqueuef(LogLevel::INFO, "DSP_pipeline running on Core %d", xPortGetCoreID());
-
-    // Verify SIMD/ESP32-S3 specific optimizations are available
-    Diagnostics::verifySIMD();
 
     // Verify hardware I/O is ready (initialized by SystemContext)
     // SystemContext::initialize() is responsible for calling hardware_driver_->initialize().
     // Avoid double-initialization here to prevent redundant driver setup.
     if (!hardware_driver_ || !hardware_driver_->isReady())
     {
-        Console::enqueue(LogLevel::ERROR, "Hardware driver not ready (initialize via SystemContext first)");
+        Console::enqueue(LogLevel::ERROR,
+                         "Hardware driver not ready (initialize via SystemContext first)");
         return false;
     }
 
-    // Configure pre-emphasis filter (50 µs for FM broadcast standard)
+    // Configure pre-emphasis filter (50/75 µs for FM broadcast standard)
     // Alpha: filter coefficient, Gain: compensation for high-frequency boost
     preemphasis_.configure(Config::PREEMPHASIS_ALPHA, Config::PREEMPHASIS_GAIN);
 
     // Configure 19 kHz notch filter to prevent pilot tone interference
-    // Removes any audio content at the pilot frequency
+    // Use ADC sampling rate for coefficient design
     notch_.configure(static_cast<float>(Config::SAMPLE_RATE_ADC), Config::NOTCH_FREQUENCY_HZ,
                      Config::NOTCH_RADIUS);
 
@@ -206,6 +252,46 @@ bool DSP_pipeline::begin()
     return true;
 }
 
+void DSP_pipeline::performSoftReset()
+{
+    // Mute pilot momentarily during reset
+    mpx_synth_.setPilotAmp(0.0f);
+
+    // Reset algorithmic state
+    preemphasis_.reset();
+    notch_.reset();
+    upsampler_.reset();
+    rds_synth_.reset();
+    pilot_19k_.reset();
+
+    // Clear buffers
+    memset(rx_buffer_, 0, sizeof(rx_buffer_));
+    memset(tx_buffer_, 0, sizeof(tx_buffer_));
+    memset(rx_f32_, 0, sizeof(rx_f32_));
+    memset(tx_f32_, 0, sizeof(tx_f32_));
+    memset(pilot_buffer_, 0, sizeof(pilot_buffer_));
+    memset(subcarrier_buffer_, 0, sizeof(subcarrier_buffer_));
+    memset(mono_buffer_, 0, sizeof(mono_buffer_));
+    memset(diff_buffer_, 0, sizeof(diff_buffer_));
+    memset(mpx_buffer_, 0, sizeof(mpx_buffer_));
+    memset(carrier57_buffer_, 0, sizeof(carrier57_buffer_));
+    memset(rds_buffer_, 0, sizeof(rds_buffer_));
+
+    // Reset stats and pilot auto-mute timer
+    stats_.reset();
+    last_above_thresh_us_ = esp_timer_get_time();
+    pilot_muted_ = false;
+
+    // Flush I2S DMA (non-blocking where possible)
+    if (hardware_driver_)
+    {
+        hardware_driver_->reset();
+    }
+
+    // Restore pilot amplitude
+    mpx_synth_.setPilotAmp(Config::PILOT_AMP);
+}
+
 // ==================================================================================
 //                    ORCHESTRATION HELPER METHODS (STAGE EXTRACTION)
 // ==================================================================================
@@ -221,47 +307,47 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
 {
     using namespace Config;
 
+    // Fast path: if program audio is disabled, or if ADC is absent/unready,
+    // synthesize a block of silence and proceed so that pilot/RDS still work.
+    auto synth_silence = [&](std::size_t frames)
+    {
+        frames_read = frames;
+        l_peak = r_peak = 0.0f;
+        l_rms = r_rms = 0.0f;
+        // Fill float buffer with zeros for L/R
+        std::size_t samples = frames * 2;
+        for (std::size_t i = 0; i < samples; ++i)
+            rx_f32_[i] = 0.0f;
+        rx_wait_us = 0;
+        deint_us = 0;
+        // Yield a tick to avoid tight spinning when no ADC is present.
+        vTaskDelay(1);
+        return true;
+    };
+
+    if (!Config::ENABLE_AUDIO)
+    {
+        return synth_silence(Config::BLOCK_SIZE);
+    }
+
     size_t bytes_read = 0;
     uint32_t tr0 = ESP.getCycleCount();
-    if (!hardware_driver_->read(rx_buffer_, sizeof(rx_buffer_), bytes_read,
-                                Config::I2S_READ_TIMEOUT_MS))
-    {
-        auto derr = hardware_driver_->getLastError();
-        int  perr = hardware_driver_->getErrorStatus();
-        const char* err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
-        char details[96];
-        switch (derr)
-        {
-        case DriverError::Timeout:
-            snprintf(details, sizeof(details), "I2S RX timeout (esp:%s)", err_name);
-            ErrorHandler::logError(ErrorCode::TIMEOUT, "DSP_pipeline::readAndConvertAudio", details);
-            break;
-        case DriverError::InvalidArgument:
-            snprintf(details, sizeof(details), "I2S RX invalid arg (esp:%s)", err_name);
-            ErrorHandler::logError(ErrorCode::INVALID_PARAM, "DSP_pipeline::readAndConvertAudio", details);
-            break;
-        case DriverError::InvalidState:
-        case DriverError::NotInitialized:
-            snprintf(details, sizeof(details), "I2S RX not ready (esp:%s)", err_name);
-            ErrorHandler::logError(ErrorCode::I2S_NOT_INITIALIZED, "DSP_pipeline::readAndConvertAudio", details);
-            break;
-        default:
-            snprintf(details, sizeof(details), "I2S RX error (esp:%s)", err_name);
-            ErrorHandler::logError(ErrorCode::I2S_READ_ERROR, "DSP_pipeline::readAndConvertAudio", details);
-            break;
-        }
-        ++stats_.errors;
-        return false;
-    }
+    bool ok = hardware_driver_->read(rx_buffer_, sizeof(rx_buffer_), bytes_read,
+                                     Config::I2S_READ_TIMEOUT_MS);
     uint32_t tr1 = ESP.getCycleCount();
     rx_wait_us = (tr1 - tr0) / (cpu_mhz ? cpu_mhz : static_cast<uint32_t>(240));
 
-    if (bytes_read == 0)
-        return false;
+    if (!ok || bytes_read == 0)
+    {
+        // ADC not present or no data available: synthesize silence and continue.
+        return synth_silence(Config::BLOCK_SIZE);
+    }
 
     frames_read = bytes_read / (2 * static_cast<std::size_t>(BYTES_PER_SAMPLE));
     if (frames_read == 0)
-        return false;
+    {
+        return synth_silence(Config::BLOCK_SIZE);
+    }
 
     // Convert Q31 to float and calculate VU levels
     uint32_t tc0 = ESP.getCycleCount();
@@ -274,6 +360,7 @@ bool DSP_pipeline::readAndConvertAudio(std::size_t &frames_read, float &l_peak, 
         std::size_t iL = (f * 2) + 0;
         std::size_t iR = (f * 2) + 1;
 
+        // Original channel order: index 0 = left, index 1 = right
         float vl = static_cast<float>(rx_buffer_[iL]) / Q31_FULL_SCALE;
         float vr = static_cast<float>(rx_buffer_[iR]) / Q31_FULL_SCALE;
 
@@ -381,8 +468,8 @@ void DSP_pipeline::writeToDAC(std::size_t frames_read)
                                  Config::I2S_WRITE_TIMEOUT_MS))
     {
         auto derr = hardware_driver_->getLastError();
-        int  perr = hardware_driver_->getErrorStatus();
-        const char* err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
+        int perr = hardware_driver_->getErrorStatus();
+        const char *err_name = esp_err_to_name(static_cast<esp_err_t>(perr));
         char details[96];
         switch (derr)
         {
@@ -397,7 +484,8 @@ void DSP_pipeline::writeToDAC(std::size_t frames_read)
         case DriverError::InvalidState:
         case DriverError::NotInitialized:
             snprintf(details, sizeof(details), "I2S TX not ready (esp:%s)", err_name);
-            ErrorHandler::logError(ErrorCode::I2S_NOT_INITIALIZED, "DSP_pipeline::writeToDAC", details);
+            ErrorHandler::logError(ErrorCode::I2S_NOT_INITIALIZED, "DSP_pipeline::writeToDAC",
+                                   details);
             break;
         default:
             snprintf(details, sizeof(details), "I2S TX error (esp:%s)", err_name);
@@ -410,7 +498,7 @@ void DSP_pipeline::writeToDAC(std::size_t frames_read)
     if (bytes_written != bytes_to_write)
     {
         Console::enqueuef(LogLevel::WARN, "Underrun (wrote %u/%u bytes)", (unsigned)bytes_written,
-                      (unsigned)bytes_to_write);
+                          (unsigned)bytes_to_write);
     }
 
     ++stats_.loops_completed;
@@ -504,19 +592,25 @@ void DSP_pipeline::updatePerformanceMetrics(uint32_t total_us, std::size_t frame
  *   1. I2S Read + Convert:  Read 64 stereo samples from ADC, convert to float
  *   2. Pre-emphasis:        Apply 50 µs FM pre-emphasis filter (optional)
  *   3. Notch Filter:        Remove 19 kHz content (pilot tone protection)
- *   4. Upsample:            48 kHz → 192 kHz using polyphase FIR (15 kHz LPF)
+ *   4. Upsample:            SAMPLE_RATE_ADC → SAMPLE_RATE_DAC using polyphase FIR (15 kHz LPF)
  *   5. Stereo Matrix:       Generate L+R (mono) and L-R (diff) signals
  *   6. MPX Synthesis:       Mix mono + pilot + (diff × 38 kHz) + RDS
  *   7. DAC Convert + Write: Convert to Q31, soft clip, write to DAC
  *   8. Metrics:             Update VU meters, performance logs
  *
  * Real-Time Constraints:
- *   • Must complete in < 1.33 ms
+ *   • Must complete within the ADC block window (≈64/SAMPLE_RATE_ADC s)
  *   • Typical: ~300 µs (22% CPU usage)
  *   • No dynamic allocation in process()
  */
 void DSP_pipeline::process()
 {
+    // Handle deferred soft reset on the audio thread
+    if (reset_requested_)
+    {
+        performSoftReset();
+        reset_requested_ = false;
+    }
     using namespace Config;
 
     uint32_t cpu_mhz = getCpuFrequencyMhz(); // Typically 240 MHz
@@ -530,8 +624,8 @@ void DSP_pipeline::process()
 
     uint32_t rx_wait_us_local = 0;
     uint32_t deint_us_local = 0;
-    if (!readAndConvertAudio(frames_read, l_peak, r_peak, l_rms, r_rms,
-                             rx_wait_us_local, cpu_mhz, deint_us_local))
+    if (!readAndConvertAudio(frames_read, l_peak, r_peak, l_rms, r_rms, rx_wait_us_local, cpu_mhz,
+                             deint_us_local))
     {
         return; // Skip cycle on read error or no data
     }
@@ -566,7 +660,7 @@ void DSP_pipeline::process()
     stats_.stage_notch.update(stage_notch_us);
 
     // ============================================================================
-    // STAGE 4: Polyphase FIR Upsampler (48 kHz → 192 kHz)
+    // STAGE 4: Polyphase FIR Upsampler (SAMPLE_RATE_ADC → SAMPLE_RATE_DAC)
     // ============================================================================
     t0 = t1;
     upsampler_.process(rx_f32_, tx_f32_, frames_read);
@@ -600,12 +694,18 @@ void DSP_pipeline::process()
         {
             // Audio present: unmute immediately if muted
             last_above_thresh_us_ = now_us;
-            if (pilot_muted_) { pilot_muted_ = false; }
+            if (pilot_muted_)
+            {
+                pilot_muted_ = false;
+            }
         }
         else
         {
             // Below threshold: if held long enough, mute pilot
-            if (!pilot_muted_ && (now_us - last_above_thresh_us_) >= hold_us) { pilot_muted_ = true; }
+            if (!pilot_muted_ && (now_us - last_above_thresh_us_) >= hold_us)
+            {
+                pilot_muted_ = true;
+            }
         }
     }
 
@@ -646,7 +746,7 @@ void DSP_pipeline::process()
         stats_.stage_rds.update(rds_us);
     }
 
-    // Duplicate MPX to stereo DAC channels
+    // Duplicate MPX to stereo DAC channels (DAC @ SAMPLE_RATE_DAC)
     for (std::size_t i = 0; i < samples; ++i)
     {
         float mpx = mpx_buffer_[i];
@@ -744,14 +844,8 @@ void DSP_pipeline::process()
  */
 bool DSP_pipeline::startTaskInstance(int core_id, UBaseType_t priority, uint32_t stack_words)
 {
-    return TaskBaseClass::spawnTaskFor(
-        this,
-        "audio",
-        stack_words,
-        priority,
-        core_id,
-        DSP_pipeline::taskTrampoline,
-        &task_handle_);
+    return TaskBaseClass::spawnTaskFor(this, "audio", stack_words, priority, core_id,
+                                       DSP_pipeline::taskTrampoline, &task_handle_);
 }
 
 /**
@@ -788,7 +882,7 @@ void DSP_pipeline::taskTrampoline(void *arg)
     // Infinite audio processing loop (never returns)
     for (;;)
     {
-        self->process(); // Process one audio block (~1.33 ms @ 48 kHz)
+        self->process(); // Process one audio block (≈64/SAMPLE_RATE_ADC seconds)
     }
 }
 
@@ -835,7 +929,7 @@ bool DSP_pipeline::startTask(IHardwareDriver *hardware_driver, int core_id, UBas
  *
  * Parameters:
  *   frames_read:   Number of frames processed in this block (typically 64)
- *   available_us:  Available processing time per block (1333 µs @ 48 kHz)
+ *   available_us:  Available processing time per block (e.g., ≈1451 µs @ 44.1 kHz)
  *   cpu_usage:     CPU usage percentage (0-100%)
  *   cpu_headroom:  CPU headroom percentage (0-100%, higher is better)
  *
@@ -889,11 +983,14 @@ void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us,
     // Processing times
     Console::enqueue(LogLevel::INFO, "----------------------------------------");
     Console::enqueue(LogLevel::INFO, "Processing time:");
-    Console::enqueuef(LogLevel::INFO, "  Total (incl. I/O waits): %.2f µs", (double)stats_.total.current);
+    Console::enqueuef(LogLevel::INFO, "  Total (incl. I/O waits): %.2f µs",
+                      (double)stats_.total.current);
     {
         float compute_us = (float)stats_.total.current - (float)stats_.stage_i2s_rx_wait.current;
-        if (compute_us < 0.0f) compute_us = 0.0f;
-        Console::enqueuef(LogLevel::INFO, "  Compute (excl. I/O waits): %.2f µs", (double)compute_us);
+        if (compute_us < 0.0f)
+            compute_us = 0.0f;
+        Console::enqueuef(LogLevel::INFO, "  Compute (excl. I/O waits): %.2f µs",
+                          (double)compute_us);
     }
     Console::enqueuef(LogLevel::INFO, "  Min: %.2f µs", (double)stats_.total.min);
     Console::enqueuef(LogLevel::INFO, "  Max: %.2f µs", (double)stats_.total.max);
@@ -906,40 +1003,40 @@ void DSP_pipeline::printPerformance(std::size_t frames_read, float available_us,
     Console::enqueue(LogLevel::INFO, "Per-Stage Breakdown:");
     Console::enqueue(LogLevel::INFO, "  1a. I2S RX wait (block):");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_i2s_rx_wait.current, (double)stats_.stage_i2s_rx_wait.min,
-                  (double)stats_.stage_i2s_rx_wait.max);
+                      (double)stats_.stage_i2s_rx_wait.current,
+                      (double)stats_.stage_i2s_rx_wait.min, (double)stats_.stage_i2s_rx_wait.max);
     Console::enqueue(LogLevel::INFO, "  1b. Deinterleave (int→float):");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_int_to_float.current, (double)stats_.stage_int_to_float.min,
-                  (double)stats_.stage_int_to_float.max);
+                      (double)stats_.stage_int_to_float.current,
+                      (double)stats_.stage_int_to_float.min, (double)stats_.stage_int_to_float.max);
     Console::enqueue(LogLevel::INFO, "  2. Gain processing:");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_preemphasis.current, (double)stats_.stage_preemphasis.min,
-                  (double)stats_.stage_preemphasis.max);
+                      (double)stats_.stage_preemphasis.current,
+                      (double)stats_.stage_preemphasis.min, (double)stats_.stage_preemphasis.max);
     Console::enqueue(LogLevel::INFO, "  3. 19 kHz notch:");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_notch.current, (double)stats_.stage_notch.min,
-                  (double)stats_.stage_notch.max);
+                      (double)stats_.stage_notch.current, (double)stats_.stage_notch.min,
+                      (double)stats_.stage_notch.max);
     Console::enqueue(LogLevel::INFO, "  4. Upsample 4× (FIR):");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_upsample.current, (double)stats_.stage_upsample.min,
-                  (double)stats_.stage_upsample.max);
+                      (double)stats_.stage_upsample.current, (double)stats_.stage_upsample.min,
+                      (double)stats_.stage_upsample.max);
     Console::enqueue(LogLevel::INFO, "  5. Stereo matrix:");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_matrix.current, (double)stats_.stage_matrix.min,
-                  (double)stats_.stage_matrix.max);
+                      (double)stats_.stage_matrix.current, (double)stats_.stage_matrix.min,
+                      (double)stats_.stage_matrix.max);
     Console::enqueue(LogLevel::INFO, "  6. MPX synthesis:");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_mpx.current, (double)stats_.stage_mpx.min,
-                  (double)stats_.stage_mpx.max);
+                      (double)stats_.stage_mpx.current, (double)stats_.stage_mpx.min,
+                      (double)stats_.stage_mpx.max);
     Console::enqueue(LogLevel::INFO, "  7. RDS injection:");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_rds.current, (double)stats_.stage_rds.min,
-                  (double)stats_.stage_rds.max);
+                      (double)stats_.stage_rds.current, (double)stats_.stage_rds.min,
+                      (double)stats_.stage_rds.max);
     Console::enqueue(LogLevel::INFO, "  8. Conversion (float→int):");
     Console::enqueuef(LogLevel::INFO, "     Cur: %6.2f µs  Min: %6.2f µs  Max: %6.2f µs",
-                  (double)stats_.stage_float_to_int.current, (double)stats_.stage_float_to_int.min,
-                  (double)stats_.stage_float_to_int.max);
+                      (double)stats_.stage_float_to_int.current,
+                      (double)stats_.stage_float_to_int.min, (double)stats_.stage_float_to_int.max);
 
     // Footer
     Console::enqueue(LogLevel::INFO, "----------------------------------------");
@@ -995,15 +1092,15 @@ void DSP_pipeline::printDiagnostics(std::size_t frames_read, int32_t peak_adc, i
 
     // ADC input level (baseline measurement)
     Console::enqueuef(LogLevel::INFO, "ADC Peak: %d (%.1f%%)", peak_adc,
-                  (peak_adc / 2147483647.0f) * 100.0f);
+                      (peak_adc / 2147483647.0f) * 100.0f);
 
     // Post-pre-emphasis level and gain
     Console::enqueuef(LogLevel::INFO, "After Pre: %d (%.1f%%)  Pre Gain: %.2f dB", peak_pre,
-                  (peak_pre / 2147483647.0f) * 100.0f, pre_db);
+                      (peak_pre / 2147483647.0f) * 100.0f, pre_db);
 
     // Post-FIR level and total gain
     Console::enqueuef(LogLevel::INFO, "After FIR: %d (%.1f%%)  Total Gain: %.2f dB", peak_fir,
-                  (peak_fir / 2147483647.0f) * 100.0f, total_db);
+                      (peak_fir / 2147483647.0f) * 100.0f, total_db);
 }
 
 // =====================================================================================

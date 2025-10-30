@@ -25,10 +25,10 @@
  *
  * Processing:
  *   Input:  Interleaved stereo samples [L₀, R₀, L₁, R₁, L₂, R₂, ...]
- *   Output: Two contiguous mono buffers (mono[], diff[]) containing 192 kHz samples
+ *   Output: Two contiguous mono buffers (mono[], diff[]) containing DAC-rate samples
  *
  *   The operation is stateless and allocation-free (no buffers allocated internally).
- *   Suitable for real-time processing on Core 0 at 192 kHz block rate.
+ *   Suitable for real-time processing on Core 0 at DAC block rate.
  *
  * Design:
  *   • Direct matrix computation: 2 operations per sample pair (1 add, 1 subtract)
@@ -37,7 +37,7 @@
  *
  * Thread Safety:
  *   Not thread-safe. Must be called exclusively from Core 0 audio processing task
- *   at 192 kHz block rate. No shared state between tasks or cores.
+ *   at DAC block rate. No shared state between tasks or cores.
  *
  * Amplitude Scaling:
  *   The mono and difference outputs are typically scaled differently before mixing:
@@ -58,4 +58,3 @@ public:
   void process(const float *interleaved, float *mono, float *diff,
                std::size_t samples);
 };
-

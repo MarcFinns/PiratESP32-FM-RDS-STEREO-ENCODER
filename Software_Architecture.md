@@ -258,16 +258,5 @@ When a profile is loaded, all DSP/audio/RDS settings are applied immediately.
 - Logs queued to Console
 - If `LogMuting::OFF` configured, applies selective silence policy
 - High-priority audio code logs non-blocking via queue
-
-## Performance Targets
-
-- **DSP block latency:** 1.33 ms (64 samples @ 48 kHz input)
-- **CPU headroom:** 20–30% (leave 70% free for other tasks)
-- **Queue depth monitoring:** Overflow counters visible in status panel
-
-## Diagrams (TODO)
-
-- Task/queue interaction diagram with producers/consumers
-- Startup and shutdown sequence flow
-- Dependency graph visualization
+ation
 

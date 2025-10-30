@@ -11,27 +11,27 @@
  * Description:  High-performance 4× upsampling via polyphase FIR filter decomposition
  *
  * Purpose:
- *   This module implements efficient 4× upsampling (48 kHz → 192 kHz) using a polyphase
+ *   This module implements efficient 4× upsampling (SAMPLE_RATE_ADC → SAMPLE_RATE_DAC) using a polyphase
  *   FIR filter architecture. This is essential for the FM multiplex pipeline, as the
  *   pilot tone (19 kHz), subcarrier (38 kHz), and RDS carrier (57 kHz) require the
- *   high 192 kHz sample rate for accurate synthesis.
+ *   high DAC sample rate (Config::SAMPLE_RATE_DAC) for accurate synthesis.
  *
  * Algorithm: Polyphase Decomposition
  *   Traditional upsampling inserts zeros between samples, then applies a 192-tap
  *   lowpass filter, wasting 75% of multiply-accumulate operations on zero-valued data.
  *   Polyphase decomposition reorganizes the filter into 4 parallel sub-filters (phases),
- *   each with 24 taps (96 ÷ 4), operating at the input rate (48 kHz). This achieves
+ *   each with 24 taps (96 ÷ 4), operating at the input rate (ADC rate). This achieves
  *   4× computational speedup:
- *     • Traditional: 96 taps × 192 kHz = 18.432 MMAC/s
- *     • Polyphase: 24 taps × 4 phases × 48 kHz = 4.608 MMAC/s
+ *     • Traditional: 96 taps × SAMPLE_RATE_DAC
+ *     • Polyphase: 24 taps × 4 phases × SAMPLE_RATE_ADC
  *
  * Filter Design:
- *   • 96-tap Kaiser-windowed sinc FIR filter
+ *   • 96-tap Kaiser-windowed sinc FIR filter (designed at runtime)
  *   • Passband: 0–15 kHz (FM audio limit + margin)
  *   • Transition: ~15–19 kHz
  *   • Stopband: ≥19 kHz (protects pilot, prevents imaging artifacts)
  *   • Attenuation: ~80 dB in stopband
- *   • Latency: 47.5 samples @ 48 kHz ≈ 0.99 ms
+ *   • Latency: 47.5 samples @ SAMPLE_RATE_ADC ≈ 0.99 ms (when 48 kHz)
  *
  * Circular Buffer Strategy:
  *   Input samples are stored in a circular delay line with mirrored wraparound to avoid
@@ -45,7 +45,7 @@
  *
  * Thread Safety:
  *   Not thread-safe. Must be called exclusively from Core 0 audio processing task
- *   at 48 kHz block rate. initialize() and reset() must not be called while
+ *   at input block rate. initialize() and reset() must not be called while
  *   process() is active.
  *
  * =====================================================================================
@@ -78,4 +78,3 @@ private:
   alignas(16) float state_R_[kTapsPerPhase * 2];
   int state_index_;
 };
-

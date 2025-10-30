@@ -12,9 +12,9 @@
  *
  * Overview:
  *   This application implements a professional-grade FM stereo encoder using the
- *   ESP32's dual-core architecture. It receives stereo audio at 48 kHz via I2S,
+ *   ESP32's dual-core architecture. It receives stereo audio at Config::SAMPLE_RATE_ADC via I2S,
  *   processes it through a multi-stage DSP pipeline, and outputs FM-multiplexed
- *   stereo at 192 kHz for transmission.
+ *   stereo at Config::SAMPLE_RATE_DAC for transmission.
  *
  * Core Architecture:
  *   CORE 0 (Real-Time Audio):
@@ -40,10 +40,10 @@
  *   VU Meter:     4,096 bytes stack (graphics rendering)
  *
  * Signal Flow:
- *   1. Audio enters via I2S RX (48 kHz stereo)
- *   2. DSP_pipeline processes 64-sample blocks (1.33 ms latency)
+ *   1. Audio enters via I2S RX (ADC-rate stereo)
+ *   2. DSP_pipeline processes 64-sample blocks (~1.45 ms @ 44.1 kHz)
  *   3. DSP pipeline: pre-emphasis → notch → upsample → MPX synthesis
- *   4. Output via I2S TX (192 kHz stereo)
+ *   4. Output via I2S TX (DAC-rate stereo)
  *   5. VU meters display real-time levels on ILI9341 TFT
  *   6. Console handles CLI and outputs diagnostics to Serial (115200 baud)
  *
@@ -57,7 +57,7 @@
 #include "ESP32I2SDriver.h"
 #include "RDSAssembler.h"
 #include "SystemContext.h"
-#include "splashscreen.h"
+#include "SplashScreen.h"
 #include <Arduino_GFX_Library.h>
 #include <pgmspace.h>
 

@@ -2,7 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
- 
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                    19 kHz Stereo Pilot Notch Filter Interface
  *
  * =====================================================================================
@@ -18,7 +18,7 @@
  *
  * Filter Specifications:
  *   • Notch center frequency: 19 kHz (exact FM pilot frequency)
- *   • Sample rate: 48 kHz (input audio domain)
+ *   • Sample rate: ADC domain (Config::SAMPLE_RATE_ADC)
  *   • Quality factor: Q ≈ 25 (sharp, ~100 Hz 3dB bandwidth)
  *   • Notch depth: ~40–60 dB attenuation at 19 kHz
  *   • Passband: ±0 dB from DC to ~15 kHz (preserves audio)
@@ -40,7 +40,7 @@
  *
  * Thread Safety:
  *   Not thread-safe. Must be called exclusively from Core 0 audio processing task
- *   at 48 kHz block rate. configure() must not be called while process() is active.
+ *   at ADC block rate. configure() must not be called while process() is active.
  *
  * =====================================================================================
  */

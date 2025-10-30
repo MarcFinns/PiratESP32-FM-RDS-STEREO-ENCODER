@@ -16,19 +16,21 @@
  * =====================================================================================
  */
 
+#include "Console.h"
 #include "ESP32I2SDriver.h"
 #include "I2SDriver.h" // AudioIO namespace (existing I2S setup code)
-#include "Console.h"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
 #include <esp_err.h>
+#include <math.h>
 
 // ==================================================================================
 //                          CONSTRUCTOR / DESTRUCTOR
 // ==================================================================================
 
-namespace {
+namespace
+{
 static DriverError mapEspError(esp_err_t err, bool is_read)
 {
     if (err == ESP_OK)
@@ -44,7 +46,8 @@ static DriverError mapEspError(esp_err_t err, bool is_read)
 }
 } // namespace
 
-ESP32I2SDriver::ESP32I2SDriver() : is_initialized_(false), last_error_(0), last_driver_error_(DriverError::None)
+ESP32I2SDriver::ESP32I2SDriver()
+    : is_initialized_(false), last_error_(0), last_driver_error_(DriverError::None)
 {
     // State initialized to not-ready
 }
@@ -80,7 +83,7 @@ bool ESP32I2SDriver::initialize()
     }
 
     // Wait for master clock to stabilize
-    delay(100);
+    delay(500);
 
     // Initialize RX (uses MCLK from TX)
     if (!initializeRx())
@@ -97,6 +100,7 @@ bool ESP32I2SDriver::initialize()
     last_error_ = 0;
     last_driver_error_ = DriverError::None;
     Console::enqueue(LogLevel::INFO, "ESP32I2SDriver initialized successfully");
+
     return true;
 }
 
@@ -158,7 +162,6 @@ bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
         bytes_written = 0;
         return false;
     }
-
     if (!buffer || buffer_bytes == 0)
     {
         last_error_ = ESP_ERR_INVALID_ARG;
@@ -166,20 +169,14 @@ bool ESP32I2SDriver::write(const int32_t *buffer, std::size_t buffer_bytes,
         bytes_written = 0;
         return false;
     }
-
-    // Perform blocking write to I2S TX
-    // Note: i2s_write expects non-const pointer, so we cast away const here
-    // The I2S driver does not modify the buffer
     esp_err_t ret = i2s_write(kI2SPortTx, const_cast<int32_t *>(buffer), buffer_bytes,
                               &bytes_written, timeout_ms);
-
     if (ret != ESP_OK)
     {
         last_error_ = ret;
         last_driver_error_ = mapEspError(ret, /*is_read=*/false);
         return false;
     }
-
     last_error_ = 0;
     last_driver_error_ = DriverError::None;
     return true;
@@ -192,14 +189,20 @@ bool ESP32I2SDriver::reset()
         return false;
     }
 
-    // Clear error flags
+    // Stop, flush, and restart both I2S ports to clear DMA state
+    i2s_stop(kI2SPortTx);
+    i2s_zero_dma_buffer(kI2SPortTx);
+    i2s_start(kI2SPortTx);
+
+    i2s_stop(kI2SPortRx);
+    i2s_zero_dma_buffer(kI2SPortRx);
+    i2s_start(kI2SPortRx);
+
     last_error_ = 0;
     last_driver_error_ = DriverError::None;
-
-    // Perform I2S reset (if supported by driver)
-    // For now, just clear error state
     return true;
 }
+
 
 // ==================================================================================
 //                          PRIVATE IMPLEMENTATION

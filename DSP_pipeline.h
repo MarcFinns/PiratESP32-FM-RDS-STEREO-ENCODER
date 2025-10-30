@@ -16,22 +16,22 @@
  *   Runs as a dedicated FreeRTOS task on Core 0 (real-time audio core).
  *
  * Processing Pipeline:
- *   1. I2S RX:  Read 48 kHz stereo audio from ADC (64 sample pairs = 1.33 ms)
+ *   1. I2S RX:  Read stereo audio from ADC @ Config::SAMPLE_RATE_ADC (64 pairs ≈ 64/SAMPLE_RATE_ADC s)
  *   2. Convert: int32 → float32 (Q31 fixed-point to normalized float)
  *   3. Pre-emphasis: Apply 50 µs FM pre-emphasis filter (IIR)
  *   4. Notch: Remove 19 kHz content to prevent pilot tone interference
- *   5. Upsample: 48 kHz → 192 kHz using 4× polyphase FIR filter
+ *   5. Upsample: Config::SAMPLE_RATE_ADC → Config::SAMPLE_RATE_DAC using 4× polyphase FIR filter
  *   6. Matrix: Generate L+R (mono) and L-R (stereo difference) signals
  *   7. NCO: Generate coherent 19/38/57 kHz carriers (harmonics from pilot)
  *   8. MPX: Mix mono + pilot + (L-R × 38 kHz) and inject RDS (57 kHz)
  *   9. Convert: float32 → int32 (normalized float to Q31 fixed-point)
- *  10. I2S TX: Write 192 kHz stereo to DAC (256 sample pairs = 1.33 ms)
+ *  10. I2S TX: Write stereo to DAC @ Config::SAMPLE_RATE_DAC (256 pairs ≈ 256/SAMPLE_RATE_DAC s)
  *
  * Real-Time Constraints:
- *   • Block size: 64 samples @ 48 kHz = 1.33 ms available time
+ *   • Block size: 64 samples @ Config::SAMPLE_RATE_ADC (~1.45 ms @ 44.1 kHz)
  *   • Target CPU: < 30% (leaves 70% headroom for jitter tolerance)
  *   • Typical performance: ~300 µs processing time (~22% CPU usage)
- *   • All processing must complete within 1.33 ms or audio glitches occur
+ *   • All processing must complete within the block window (≈64/SAMPLE_RATE_ADC s)
  *
  * Task Architecture:
  *   • Pinned to Core 0 (dedicated audio core, no interruptions)
@@ -79,8 +79,9 @@
 /**
  * DSP_pipeline - FM Stereo Encoding Pipeline Orchestrator
  *
- * This class manages the complete audio processing pipeline from 48 kHz ADC input
- * to 192 kHz DAC output, including pre-emphasis, upsampling, and FM multiplex
+ * This class manages the complete audio processing pipeline from ADC input
+ * (Config::SAMPLE_RATE_ADC) to DAC output (Config::SAMPLE_RATE_DAC), including
+ * pre-emphasis, upsampling, and FM multiplex
  * synthesis. It runs as a high-priority FreeRTOS task on Core 0.
  *
  * Responsibilities:
@@ -93,7 +94,7 @@
  * Usage Pattern:
  *   1. Call DSP_pipeline::startTask() to spawn the audio task
  *   2. Task creates an DSP_pipeline instance and calls begin()
- *   3. Infinite loop calls process() at 48 kHz block rate (every 1.33 ms)
+ *   3. Infinite loop calls process() at ADC block rate (every ~64/SAMPLE_RATE_ADC s)
  *   4. Each process() call reads one block, processes it, and writes output
  *
  * Thread Safety:
@@ -167,8 +168,8 @@ class DSP_pipeline
      * Initialize Audio Engine
      *
      * Called by the audio task after DSP_pipeline construction. Performs:
-     *   1. I2S TX initialization (192 kHz DAC output)
-     *   2. I2S RX initialization (48 kHz ADC input)
+     *   1. I2S TX initialization (DAC output @ Config::SAMPLE_RATE_DAC)
+     *   2. I2S RX initialization (ADC input @ Config::SAMPLE_RATE_ADC)
      *   3. NCO initialization (19 kHz pilot, 38 kHz subcarrier)
      *   4. Pre-emphasis filter initialization
      *   5. Upsampler initialization (loads polyphase FIR coefficients)
@@ -186,19 +187,19 @@ class DSP_pipeline
      * Process One Audio Block
      *
      * Main DSP processing function. Called in a tight loop by the audio task.
-     * Processes exactly 64 stereo sample pairs (1.33 ms @ 48 kHz).
+     * Processes exactly 64 stereo sample pairs (≈64/SAMPLE_RATE_ADC seconds).
      *
      * Processing Steps:
-     *   1. Read 64 samples from I2S RX (48 kHz, blocking)
+     *   1. Read 64 samples from I2S RX (blocking)
      *   2. Convert int32 → float32 (Q31 to normalized [-1.0, +1.0])
      *   3. Apply pre-emphasis filter (50 µs time constant)
      *   4. Apply 19 kHz notch filter
-     *   5. Upsample 48 kHz → 192 kHz (64 → 256 samples)
+     *   5. Upsample Config::SAMPLE_RATE_ADC → Config::SAMPLE_RATE_DAC (64 → 256 samples)
      *   6. Generate L+R (mono) and L-R (diff) signals
      *   7. Generate coherent 19/38/57 kHz carriers
      *   8. Mix mono + pilot + (diff × 38 kHz) + RDS = FM multiplex
      *   9. Convert float32 → int32 (normalized to Q31)
-     *  10. Write 256 samples to I2S TX (192 kHz, blocking)
+     *  10. Write 256 samples to I2S TX (blocking)
      *  11. Update VU meters (every 5 ms)
      *  12. Log performance stats (every 5 seconds)
      *
@@ -215,6 +216,14 @@ class DSP_pipeline
      *       infinite loop by the audio task.
      */
     void process();
+
+    /**
+     * Request a soft reset of the DSP pipeline.
+     * Thread-safe: sets a flag that is handled inside process() on Core 0.
+     * Reset clears filter states, NCO phase, statistics, and buffers, and
+     * flushes I2S DMA via hardware_driver_->reset().
+     */
+    void requestReset();
 
     /**
      * Start Audio Task (Instance Method)
@@ -275,7 +284,7 @@ class DSP_pipeline
      *
      * Parameters:
      *   frames_read:   Number of frames processed since last log
-     *   available_us:  Available time per block (1333 µs @ 48 kHz)
+     *   available_us:  Available time per block (e.g., 1333 µs @ 48 kHz)
      *   cpu_usage:     CPU usage percentage (0-100%)
      *   cpu_headroom:  Headroom percentage (0-100%)
      *
@@ -346,6 +355,9 @@ class DSP_pipeline
      */
     void updatePerformanceMetrics(uint32_t total_us, std::size_t frames_read);
 
+    /** Perform the actual reset on the audio thread. */
+    void performSoftReset();
+
     // ==================================================================================
     //                          DSP PIPELINE MODULES
     // ==================================================================================
@@ -359,7 +371,7 @@ class DSP_pipeline
     NotchFilter19k notch_;
 
     // ---- Polyphase FIR Upsampler ----
-    // 4× upsampling: 48 kHz → 192 kHz using 96-tap polyphase FIR (15 kHz LPF)
+    // 4× upsampling: SAMPLE_RATE_ADC → SAMPLE_RATE_DAC using 96-tap polyphase FIR (15 kHz LPF)
     PolyphaseFIRUpsampler upsampler_;
 
     // ---- Stereo Matrix ----
@@ -395,11 +407,11 @@ class DSP_pipeline
     // ---- I2S Buffers (int32, Q31 fixed-point) ----
     alignas(16) int32_t rx_buffer_[Config::BLOCK_SIZE * 2];
     // RX buffer: 64 samples × 2 channels = 128 samples = 512 bytes
-    // Holds 48 kHz stereo input from ADC (interleaved L, R, L, R, ...)
+    // Holds ADC-rate stereo input from ADC (interleaved L, R, L, R, ...)
 
     alignas(16) int32_t tx_buffer_[Config::BLOCK_SIZE * Config::UPSAMPLE_FACTOR * 2];
     // TX buffer: 64 × 4 × 2 = 512 samples = 2048 bytes
-    // Holds 192 kHz stereo output to DAC (interleaved L, R, L, R, ...)
+    // Holds DAC-rate stereo output to DAC (interleaved L, R, L, R, ...)
 
     // ---- Floating-Point Processing Buffers ----
     alignas(16) float rx_f32_[Config::BLOCK_SIZE * 2];
@@ -458,6 +470,7 @@ class DSP_pipeline
     // ==================================================================================
     bool pilot_muted_ = false;                // Current mute state
     uint64_t last_above_thresh_us_ = 0;       // Last time audio was above threshold
+    volatile bool reset_requested_ = false;   // Soft reset request flag
 
     /**
      * Task Trampoline (Static Entry Point)

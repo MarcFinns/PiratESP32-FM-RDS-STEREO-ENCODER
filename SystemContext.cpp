@@ -24,6 +24,7 @@
 #include "Console.h"
 #include "RDSAssembler.h"
 #include "DisplayManager.h"
+#include "I2SDriver.h"  // for AudioIO::emitHardwareRecap (safe recap)
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -94,7 +95,7 @@ SystemContext::~SystemContext()
  * 1. Validate hardware driver (required)
  * 2. Initialize hardware driver (I2S setup, DMA, etc.)
  * 3. Start Console task (Core 1) - Serial owner; drains logs and handles CLI
- * 4. Start VU Meter task (Core 0) - display feedback
+ * 4. Start VU Meter task (Core 1) - display feedback
  * 5. Start RDS Assembler task (Core 1) if enabled - RDS bitstream generation
  * 6. Start DSP Pipeline task (Core 0) - audio processing (highest priority)
  *
@@ -178,6 +179,13 @@ bool SystemContext::initialize(IHardwareDriver *hardware_driver, int dsp_core_id
     }
 
     Console::enqueuef(LogLevel::INFO, "Hardware driver initialized");
+
+    // Emit a neat multi-line recap before starting other tasks (safe timing)
+    AudioIO::emitHardwareRecap();
+    // Give the logger a brief window to flush recap before other modules log
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // Tone test removed: always proceed with normal initialization
 
     // ---- Step 3: Start VU Meter Task (Core 0) ----
     // Visual feedback for operator - lower priority than logging

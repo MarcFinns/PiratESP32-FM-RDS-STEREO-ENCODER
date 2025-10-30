@@ -12,7 +12,7 @@
  *
  * Purpose:
  *   This module generates the 57 kHz RDS injection signal synchronously within the
- *   audio processing pipeline (Core 0, 192 kHz block rate). It implements the complete
+ *   audio processing pipeline (Core 0, DAC sample-rate block, Config::SAMPLE_RATE_DAC).
  *   RDS encoding chain:
  *     • Bit-to-symbol conversion with differential Manchester encoding (bi-phase mark)
  *     • Symbol-rate timing generation (1187.5 bps, matched to FM multiplex structure)
@@ -36,8 +36,8 @@
  *
  * Symbol Timing (Manchester):
  *   Each RDS bit is represented as 1 Manchester symbol (2 transitions per symbol):
- *     • Symbol period: 1 ÷ 1187.5 ≈ 842 µs @ 48 kHz = 40.32 samples
- *     • At 192 kHz: 161.28 samples per symbol (not integer, so phase accumulation)
+ *     • Symbol period: 1 ÷ 1187.5 ≈ 842 µs
+ *     • Samples per symbol depend on DAC sample rate (phase-accumulated)
  *   The module uses a normalized phase accumulator [0,1) for continuous symbol timing.
  *
  * Baseband Shaping (Biquad Cascade):
@@ -53,7 +53,7 @@
  *
  * Integration:
  *   DSP_pipeline provides the coherent 57 kHz carrier and calls processBlockWithCarrier()
- *   at 192 kHz block rate. The output is mixed into the MPX signal before I2S TX.
+ *   at DAC block rate (Config::SAMPLE_RATE_DAC). The output is mixed into the MPX signal before I2S TX.
  *
  * =====================================================================================
  */
@@ -69,13 +69,13 @@ class Synth
 public:
     Synth();
 
-    // Configure symbol timing and baseband filters for the given sample rate (192 kHz)
+    // Configure symbol timing and baseband filters for the given sample rate (DAC rate)
     void configure(float sample_rate_hz);
 
     // Reset phase and filter state
     void reset();
 
-    // Generate one 192 kHz block
+    // Generate one DAC-rate block
     // carrier57: coherent 57 kHz cosine array (derived from master 19 kHz phase)
     // amp: injection amplitude (0.0–1.0, typically ~0.03)
     // out: output buffer to receive the modulated RDS block (length = samples)
@@ -95,4 +95,3 @@ private:
     float w2_[2]{};   // state for section 2
 };
 } // namespace RDSSynth
-

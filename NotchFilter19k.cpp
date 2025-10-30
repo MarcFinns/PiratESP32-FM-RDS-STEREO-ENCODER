@@ -17,11 +17,11 @@
  *
  * Filter Design:
  *   The filter is a second-order biquad IIR notch (all-pass denominator structure),
- *   configured as a narrow, deep notch centered on 19 kHz in the 48 kHz domain:
+ *   configured as a narrow, deep notch centered on 19 kHz in the ADC domain:
  *
  *   • Notch center: f₀ = 19 kHz (FM stereo pilot frequency)
- *   • Sample rate: fs = 48 kHz (input audio domain)
- *   • Normalized frequency: fn = f₀ / fs = 19/48 ≈ 0.396 (in [0, 0.5])
+ *   • Sample rate: fs = ADC input rate (Config::SAMPLE_RATE_ADC)
+ *   • Normalized frequency: fn = f₀ / fs (in [0, 0.5])
  *   • Quality factor: Q ≈ 25 (typical for deep, narrow notch)
  *   • Passband gain: 0 dB (unity DC and high-frequency response)
  *   • Notch depth: ~40–60 dB attenuation at 19 kHz
@@ -66,6 +66,7 @@
 
 #include "dsps_biquad.h"
 #include "dsps_biquad_gen.h"
+#include "DSPCompat.h"
 
 // ==================================================================================
 //                          CONSTRUCTOR & INITIALIZATION
@@ -193,7 +194,7 @@ void NotchFilter19k::process(float* buffer, std::size_t frames)
      *
      * Why 64 samples?
      *   • Typical audio block size is 256–512 samples per callback
-     *   • With 48 kHz stereo (interleaved), this is 128–256 frames
+     *   • With 48 kHz stereo (interleaved), this is 128–256 frames (scales with SAMPLE_RATE_ADC)
      *   • Stack allocation of 2 × 64 × 4 bytes = 512 bytes (well within ESP32 limits)
      *   • Larger buffers waste stack or require dynamic allocation
      *   • Smaller buffers require multiple passes (reduced efficiency)
@@ -233,8 +234,8 @@ void NotchFilter19k::process(float* buffer, std::size_t frames)
         }
 
         // Apply notch filter to chunk
-        dsps_biquad_f32_aes3(left, left, (int)chunk, coef_, wL_);
-        dsps_biquad_f32_aes3(right, right, (int)chunk, coef_, wR_);
+        DSP_BIQUAD_F32(left, left, (int)chunk, coef_, wL_);
+        DSP_BIQUAD_F32(right, right, (int)chunk, coef_, wR_);
 
         // Reinterleave filtered chunk back into buffer
         for (std::size_t i = 0; i < chunk; ++i)

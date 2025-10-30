@@ -12,7 +12,8 @@
  *
  * Purpose:
  *   This implementation module provides the signal mixing kernel for constructing
- *   the complete FM stereo multiplex signal at 192 kHz. It combines mono (L+R),
+ *   the complete FM stereo multiplex signal at DAC rate (Config::SAMPLE_RATE_DAC).
+ *   It combines mono (L+R),
  *   pilot tone (19 kHz), and stereo subcarrier (L-R modulated on 38 kHz) with
  *   configurable scaling factors.
  *

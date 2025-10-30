@@ -2,7 +2,7 @@
  * =====================================================================================
  *
  *                      PiratESP32 - FM RDS STEREO ENCODER
- 
+ *                      (c) 2025 MFINI, Anthropic Claude Code, OpenAI Codex
  *                        Error Handler Utility (Header Only)
  *
  * =====================================================================================

@@ -15,9 +15,9 @@
  *   Encapsulates all ESP32-specific I2S operations and hardware configuration.
  *
  * Features:
- *   • I2S TX: 192 kHz stereo DAC output
- *   • I2S RX: 48 kHz stereo ADC input
- *   • Master clock: 24.576 MHz shared between ADC and DAC
+ *   • I2S TX: Stereo DAC output at Config::SAMPLE_RATE_DAC
+ *   • I2S RX: Stereo ADC input at Config::SAMPLE_RATE_ADC
+ *   • Master clock: SAMPLE_RATE_* × (128/512) (e.g., 22.5792 MHz for 44.1k family)
  *   • Configurable GPIO pins (defined in Config.h)
  *
  * Usage:
@@ -44,12 +44,12 @@
  * ESP32-S3 I2S Hardware Driver
  *
  * Provides concrete implementation of audio I/O for ESP32-S3.
- * Manages two independent I2S ports: I2S_NUM_0 (RX) and I2S_NUM_1 (TX).
+ * Manages two independent I2S ports: I2S_NUM_0 (TX) and I2S_NUM_1 (RX).
  *
  * Hardware Configuration:
- *   • I2S_NUM_0: Input (ADC) @ 48 kHz
- *   • I2S_NUM_1: Output (DAC) @ 192 kHz
- *   • MCLK: 24.576 MHz (shared reference clock)
+ *   • I2S_NUM_0: Output (DAC) @ Config::SAMPLE_RATE_DAC
+ *   • I2S_NUM_1: Input (ADC) @ Config::SAMPLE_RATE_ADC
+ *   • MCLK: SAMPLE_RATE_* × (128/512) (e.g., 22.5792 MHz for 44.1k family)
  *   • Format: I2S Philips, 24-bit samples in 32-bit words
  *
  * Pins (from Config.h):
@@ -99,13 +99,13 @@ public:
     /**
      * Initialize Hardware I/O System
      *
-     * Sets up both I2S TX (192 kHz DAC) and I2S RX (48 kHz ADC).
+     * Sets up both I2S TX (DAC at Config::SAMPLE_RATE_DAC) and I2S RX (ADC at Config::SAMPLE_RATE_ADC).
      * TX is initialized before RX to establish MCLK reference.
      *
      * Sequence:
-     *   1. Configure I2S TX peripheral (DAC, 192 kHz)
+     *   1. Configure I2S TX peripheral (DAC)
      *   2. Wait 100 ms for MCLK stabilization
-     *   3. Configure I2S RX peripheral (ADC, 48 kHz)
+     *   3. Configure I2S RX peripheral (ADC)
      *   4. Mark as ready and set error state to 0
      *
      * Returns:
@@ -163,16 +163,14 @@ public:
     /**
      * Get Current Input Sample Rate
      *
-     * Returns:
-     *   48000 Hz (fixed for this implementation)
+     * Returns current ADC sample rate (Config::SAMPLE_RATE_ADC)
      */
     uint32_t getInputSampleRate() const override { return kInputSampleRate; }
 
     /**
      * Get Current Output Sample Rate
      *
-     * Returns:
-     *   192000 Hz (fixed for this implementation)
+     * Returns current DAC sample rate (Config::SAMPLE_RATE_DAC)
      */
     uint32_t getOutputSampleRate() const override { return kOutputSampleRate; }
 
@@ -211,6 +209,7 @@ public:
      */
     bool reset() override;
 
+
 private:
     // ==================================================================================
     //                          CONSTANTS
@@ -221,8 +220,8 @@ private:
     static constexpr uint32_t kOutputSampleRate = Config::SAMPLE_RATE_DAC;   // 192000 Hz
 
     // I2S port assignments
-    static constexpr i2s_port_t kI2SPortRx = I2S_NUM_0;  // ADC (RX) input
-    static constexpr i2s_port_t kI2SPortTx = I2S_NUM_1;  // DAC (TX) output
+    static constexpr i2s_port_t kI2SPortRx = I2S_NUM_1;  // ADC (RX) input
+    static constexpr i2s_port_t kI2SPortTx = I2S_NUM_0;  // DAC (TX) output
 
     // I2S configuration constants
     static constexpr int kI2SBitsPerSample = 32;  // 32-bit container
@@ -236,14 +235,15 @@ private:
     int         last_error_;         ///< Last platform error (esp_err_t). 0 = no error
     DriverError last_driver_error_;  ///< Last error (typed)
 
+
     // ==================================================================================
     //                          PRIVATE HELPER METHODS
     // ==================================================================================
 
     /**
-     * Initialize I2S TX Peripheral (192 kHz DAC Output)
+     * Initialize I2S TX Peripheral (DAC Output)
      *
-     * Sets up I2S_NUM_1 for 192 kHz stereo output.
+     * Sets up I2S_NUM_0 for stereo output at Config::SAMPLE_RATE_DAC.
      * Must be called before RX to establish MCLK reference.
      *
      * Returns:
@@ -253,9 +253,9 @@ private:
     bool initializeTx();
 
     /**
-     * Initialize I2S RX Peripheral (48 kHz ADC Input)
+     * Initialize I2S RX Peripheral (ADC Input)
      *
-     * Sets up I2S_NUM_0 for 48 kHz stereo input.
+     * Sets up I2S_NUM_1 for stereo input at Config::SAMPLE_RATE_ADC.
      * Must be called after TX to use MCLK established by TX.
      *
      * Returns:
@@ -267,14 +267,14 @@ private:
     /**
      * Shutdown I2S TX Peripheral
      *
-     * Stops DMA transfers and releases I2S_NUM_1 resources.
+     * Stops DMA transfers and releases I2S_NUM_0 resources.
      */
     void shutdownTx();
 
     /**
      * Shutdown I2S RX Peripheral
      *
-     * Stops DMA transfers and releases I2S_NUM_0 resources.
+     * Stops DMA transfers and releases I2S_NUM_1 resources.
      */
     void shutdownRx();
 };

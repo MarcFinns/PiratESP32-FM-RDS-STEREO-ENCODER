@@ -22,7 +22,7 @@
  *
  *   Discrete-time implementation used here (allocation-free, stable):
  *     y[n] = gain · (x[n] − α · x[n−1])
- *     where α = exp(−1 / (τ · fs)), τ in seconds, fs = 48 kHz (input domain)
+ *     where α = exp(−1 / (τ · fs)), τ in seconds, fs = ADC sample rate (input domain)
  *
  *   Notes:
  *     • This “leaky differentiator” form implements the pre‑emphasis high‑pass
@@ -41,11 +41,10 @@
  *
  * Thread Safety:
  *   Not thread-safe. Must be called exclusively from Core 0 audio processing task
- *   at 48 kHz block rate. reset() must not be called while process() is active.
+ *   at ADC block rate. reset() must not be called while process() is active.
  *
  * Typical Configuration:
- *   configure(0.015, 1.0) for 75 μs pre-emphasis with unity DC gain
- *   (alpha value depends on sample rate; 0.015 is appropriate for 48 kHz)
+ *   Use Config::PREEMPHASIS_ALPHA and Config::PREEMPHASIS_GAIN (computed for current fs)
  *
  * =====================================================================================
  */
