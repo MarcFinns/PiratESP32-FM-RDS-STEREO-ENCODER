@@ -6,6 +6,10 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 ![In action](Picture.jpeg)
 
+**This project was the testbed to benchmark AI-assisted software develpment tools (Anthropic Claude Code and OpenAI Codex)** in a complex setup, beyond the usual precooked demos!
+
+![In action](Picture.jpeg)
+
 ## Features
 
 - **Real-time FM Stereo Encoding**: Stereo audio → FM multiplex (MPX) @ 192 kHz DAC
