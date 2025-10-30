@@ -1,10 +1,6 @@
 # PiratESP32 - DSP BASED RDS STEREO ENCODER FOR FM RADIO
 
-A complete FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 microcontroller. This project processes stereo audio in real-time through a sophisticated 24 bit DSP pipeline leveraging the ESP32-S3 SIMD architecture, to generate broadcast-quality FM multiplex signals.
-
-**This project was the testbed to benchmark AI-assisted software develpment tools (Anthropic Claude Code and OpenAI Codex)** in a complex setup, beyond the usual precooked demos!
-
-![In action](Picture.jpeg)
+A complete FM stereo encoder with RDS (Radio Data System) support, implemented entirely in software on the ESP32-S3 **(and now ESP32)** microcontroller. This project processes stereo audio in real-time through a sophisticated 24 bit DSP pipeline to generate broadcast-quality FM multiplex signals.
 
 **This project was the testbed to benchmark AI-assisted software develpment tools (Anthropic Claude Code and OpenAI Codex)** in a complex setup, beyond the usual precooked demos!
 
@@ -12,27 +8,25 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 ## Features
 
-- **Real-time FM Stereo Encoding**: Stereo audio → FM multiplex (MPX) @ 192 kHz DAC
+- **Real-time FM Stereo Encoding**: Stereo audio → FM multiplex (MPX)
 - **RDS Core**: PI/PTY/TP/TA/MS, PS/RT with EU PTY mapping; RT rotation list
 - **Runtime Controls (SCPI/JSON)**: Full CLI for RDS, audio, pilot, and system; JSON replies
 - **Profiles (NVS)**: Save/load named configurations via serial console
 - **Pilot Control**: Enable and auto‑mute on silence (threshold/hold configurable)
-- **Pre‑emphasis**: 50 µs (EU)
+- **Configurable Pre‑emphasis**: 50 µs (EU) or 75 µs
 - **Sophisticated DSP Pipeline**:
-  - DMA driven audio sampling at 24 bit, 48KHz
-  - Pre‑emphasis filtering (50 µs)
+  - Audio sampling at 24 bit
+  - Pre‑emphasis filtering (50/75 µs)
   - 19 kHz notch filter to prevent pilot tone interference
-  - 4× polyphase FIR upsampling (48 kHz → 192 kHz) with 15KHz LPF
+  - 4× polyphase FIR upsampling (48 kHz → 192 kHz or 44.1 kHz → 176.4 kHz) with 15KHz LPF
   - Stereo matrix (L+R mono and L-R difference signals)
   - Numerically controlled oscillator (NCO) for phase-coherent 19KHz pilot tone, 38 KHz stereo subcarrier, 57 KHz RDS subcarrier
   - Double sideband suppressed carrier (DSB-SC) modulation of stereo difference signal on digitally synthesised 38 KHz subcarrier
-  - RDS data blocks generation
-  - RDS bitstream differential and Manchester encoding 
-  - BPSK modulation of RDS bitstream on digitally synthesised 57 KHz subcarrier
+  - RDS BPSK modulation on digitally synthesised 57 KHz subcarrier
   - Digital mixing of L+R mono signal, 19KHz pilot, DSB-SC modulated 38 KHz subcarrier, and BPSK modulated 57 KHz subcarrier
-  - DMA driven MPX audio out via 32 bit DAC at 192 KHz
+  - MPX audio out via 32 bit DAC at 176.4 kHz or 192 KHz
   
-- **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring and RDS data
+- **Real-time VU Meters**: ILI9341 TFT display with stereo level monitoring
 - **Dual-Core Architecture**: Four tasks across both cores (DSP/Console/RDS/Display)
 - **Performance Monitoring**: Real-time CPU usage and audio statistics logging
 
@@ -41,30 +35,32 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 The project works with the following components, or even better with the board described in [ESP32 S3 STEREO DSP](https://github.com/MarcFinns/ESP32-S3-STEREO-DSP)
 
 ### ESP32 Board
-- ESP32-S3 with dual-core processor
-- Minimum 520 KB SRAM recommended
+- ESP32-S3 or classic ESP32 with dual-core processor
 
 ### Audio Interfaces
-- **ADC**: PCM1808 I2S audio ADC (24 bit, 48 kHz sample rate, I2S slave)
-- **DAC**: PCM5102A I2S audio DAC (16/24/32 bit, 192 kHz sample rate, I2S slave)
-- **Master Clock**: 24.576 MHz MCLK for synchronization (ESP32 is I2S master)
+- **ADC**: PCM1808 I2S audio ADC (24 bit, I2S slave)
+- **DAC**: PCM5102A I2S audio DAC (16/24/32 bit, I2S slave)
+- **Master Clock**: 22.579 MHz or 24.576 MHz MCLK for synchronization (ESP32 is I2S master)
 
 ### Display (Optional)
 - ILI9341 320×240 TFT LCD (SPI interface)
-- Used for real-time VU meter visualization of audio levels and RDS data
+- Used for real-time VU meter visualization and debug messages
 
 ## Pin Configuration
 
-### I2S Audio
-```
-Master Clock (shared):  GPIO 8  (24.576 MHz MCLK)
+**NOTE:** Two separate sections in config.h for ESP32-S3 and classic ESP32
 
-DAC Output (192 kHz):
+
+### I2S Audio 
+```
+Master Clock (shared):  GPIO 8  (22.579 MHz or 24.576 MHz MCLK)
+
+DAC Output:
   BCK  (Bit Clock):     GPIO 9
   LRCK (Word Select):   GPIO 11
   DOUT (Serial Data):   GPIO 10
 
-ADC Input (48 kHz):
+ADC Input:
   BCK  (Bit Clock):     GPIO 4
   LRCK (Word Select):   GPIO 6
   DIN  (Serial Data):   GPIO 5
@@ -101,13 +97,13 @@ RST  (Reset):           GPIO 2
 ### Signal Flow
 
 ```
-1. I2S RX (48 kHz stereo ADC input)
+1. I2S RX (stereo ADC input)
         ↓
-2. Pre-emphasis filter (50 µs FM standard)
+2. Pre-emphasis filter (50 or 75 µs FM standard)
         ↓
 3. 19 kHz notch filter
         ↓
-4. 4× polyphase FIR upsampling (48 kHz → 192 kHz)
+4. 4× polyphase FIR upsampling
         ↓
 5. Stereo matrix (L+R and L-R signals)
         ↓
@@ -115,7 +111,7 @@ RST  (Reset):           GPIO 2
         ↓
 7. MPX synthesis (mono + pilot + stereo + RDS)
         ↓
-8. I2S TX (192 kHz stereo DAC output)
+8. I2S TX (DAC output)
 ```
 
 ## Installation
@@ -148,8 +144,8 @@ All configuration parameters are centralized in `Config.h`:
 
 ```cpp
 // Sample rates
-SAMPLE_RATE_ADC = 48000   // Input sample rate (Hz)
-SAMPLE_RATE_DAC = 192000  // Output sample rate (Hz)
+SAMPLE_RATE_ADC = 48000 or 44100   // Input sample rate (Hz)
+SAMPLE_RATE_DAC = 192000 or 176400 // Output sample rate (Hz)
 
 // Audio processing
 BLOCK_SIZE = 64           // Samples per block (1.33 ms latency)
@@ -250,8 +246,8 @@ See `docs/Project_Structure.md` for a complete overview of files and folders.
 **Typical Processing Metrics:**
 - Block processing time: ~300 µs
 - Available time per block: 1,333 µs (@ 48 kHz, 64 samples)
-- CPU usage: ~22%
-- Headroom: ~78%
+- CPU usage: ~52%
+- Headroom: ~48%
 - Latency: 1.33 ms (negligible for audio applications)
 
 **Memory Usage:**
@@ -262,11 +258,11 @@ See `docs/Project_Structure.md` for a complete overview of files and folders.
 
 ## Technical Details
 
-### FM Stereo Multiplex Format
+### FM Stereo Multiplex Spectrum
 ```
 0-15 kHz:    Mono (L+R) - main audio channel
 19 kHz:      Pilot tone (9% modulation) - stereo indicator
-23-53 kHz:   Stereo subcarrier (L-R modulated on 38 kHz DSB-SC)
+23-53 kHz:   Stereo subcarrier (L-R, DSB-SC modulated on 38 kHz)
 57 kHz:      RDS data (1187.5 bps, BPSK modulation)
 ```
 
