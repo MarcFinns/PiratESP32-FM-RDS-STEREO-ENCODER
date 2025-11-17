@@ -4,7 +4,7 @@ A complete FM stereo encoder with RDS (Radio Data System) support, implemented e
 
 **This project was the testbed to benchmark AI-assisted software develpment tools (Anthropic Claude Code and OpenAI Codex)** in a complex setup, beyond the usual precooked demos!
 
-**IMPORTANT NOTE** Some PCM1808 ADC breakout boards from AliExpress have a very aggressive low pass filter (the filter is optional from the datasheet, and they chose a wrong capacitor value). This results in a lowpass filter at 6Khz! If sound is muffled, you can just desolder the caps (or break them, it is fine). See explanation and pictures in [ESP32 S3 STEREO DSP](https://github.com/MarcFinns/ESP32-S3-STEREO-DSP)
+**IMPORTANT NOTE** Some PCM1808 ADC breakout boards from AliExpress have a very aggressive low pass filter (according to the ADC datasheet, the filter is unnecessary and they chose a wrong capacitor value...). This results in a lowpass filter at 6Khz! If sound is muffled, you can just desolder the caps (or break them, it is fine). See explanation and pictures of where these caps are in [ESP32 S3 STEREO DSP](https://github.com/MarcFinns/ESP32-S3-STEREO-DSP)
 
 ![In action](Picture.jpeg)
 
