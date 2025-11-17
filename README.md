@@ -111,7 +111,7 @@ RST  (Reset):           GPIO 2
         ↓
 7. MPX synthesis (mono + pilot + stereo + RDS)
         ↓
-8. I2S TX (DAC output)
+8. I2S TX (DAC output - the DAC is stereo, the same MPX signal is on both outputs)
 ```
 
 ## Installation
